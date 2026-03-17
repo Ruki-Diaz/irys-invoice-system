@@ -2,7 +2,7 @@ from flask import Flask
 from models import db
 from flask_login import LoginManager
 import os
-from flask_login import LoginManager
+
 
 def create_app():
     app = Flask(__name__)
@@ -27,6 +27,8 @@ def create_app():
     app.register_blueprint(routes_bp)
 
     return app
+
+app = create_app()
 
 if __name__ == '__main__':
     app = create_app()
