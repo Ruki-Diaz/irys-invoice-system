@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Dashboard</h1>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-4 mb-4 mt-2">
+    <div class="col">
+        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden" style="background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%);">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Total Transactions</h6>
+                <h3 class="card-text display-6 fw-bold text-dark mb-0">{{ total_tx }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden" style="background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%);">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Total Invoiced</h6>
+                <h3 class="card-text display-6 fw-bold text-dark mb-0">${{ "%.2f"|format(total_invoice) }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden" style="background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Total Payments</h6>
+                <h3 class="card-text display-6 fw-bold text-dark mb-0">${{ "%.2f"|format(total_payment) }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Outstanding Balance</h6>
+                <h3 class="card-text display-6 fw-bold text-danger mb-0">${{ "%.2f"|format(total_outstanding) }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <a href="{{ url_for('routes.add_transaction') }}" class="btn btn-primary me-2 mb-2">Add New Transaction</a>
+                <a href="{{ url_for('routes.view_transactions') }}" class="btn btn-outline-secondary me-2 mb-2">View All Records</a>
+                <a href="{{ url_for('routes.reports') }}" class="btn btn-outline-info me-2 mb-2">Generate Reports</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Reports & Exports</h1>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 g-4">
+    <!-- Customer Statement -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-primary text-white">
+                <h5 class="card-title mb-0">Customer Statement (PDF)</h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text text-muted">Generate a consolidated statement for a specific customer, showing all their transactions and total outstanding balance.</p>
+                
+                <div class="input-group mb-3 mt-4">
+                    <select class="form-select" id="cust_select">
+                        <option value="" selected disabled>Select a customer...</option>
+                        {% for c in customers %}
+                        <option value="{{ c.id }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-outline-primary" type="button" id="btn_cust_statement">Generate PDF</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Outstanding Payments Report -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-danger text-white">
+                <h5 class="card-title mb-0">Outstanding Payments (PDF)</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <p class="card-text text-muted">A comprehensive overview of all customers who currently have an outstanding balance greater than zero.</p>
+                <a href="{{ url_for('routes.pdf_outstanding') }}" class="btn btn-danger mt-auto align-self-start">Generate PDF</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Report -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-info text-white">
+                <h5 class="card-title mb-0">System Summary (PDF)</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <p class="card-text text-muted">High-level snapshot of the entire system, showing total transactions, invoiced amounts, and payments.</p>
+                <a href="{{ url_for('routes.pdf_summary') }}" class="btn btn-info text-white mt-auto align-self-start">Generate PDF</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Excel Export -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-success text-white">
+                <h5 class="card-title mb-0">Export All Data (Excel)</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <p class="card-text text-muted">Download all transaction data to Microsoft Excel format (.xlsx) for custom analysis or backup.</p>
+                <a href="{{ url_for('routes.export_excel') }}" class="btn btn-success mt-auto align-self-start">Download Excel</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('btn_cust_statement').addEventListener('click', function() {
+        const select = document.getElementById('cust_select');
+        const custId = select.value;
+        if(custId) {
+            window.location.href = "{{ url_for('routes.pdf_customer_statement', customer_id=0) }}".replace('/0', '/' + custId);
+        } else {
+            alert('Please select a customer first.');
+        }
+    });
+</script>
+{% endblock %}

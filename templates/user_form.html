@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">{% if user %}Edit{% else %}Add{% endif %} User</h1>
+</div>
+
+<div class="row">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="username" name="username" value="{{ user.username if user else '' }}" required {% if user and user.username == 'admin' %}readonly{% endif %}>
+                        {% if user and user.username == 'admin' %}
+                        <div class="form-text">The main admin username cannot be changed.</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="password" class="form-label">
+                            Password {% if not user %}<span class="text-danger">*</span>{% endif %}
+                        </label>
+                        <input type="password" class="form-control" id="password" name="password" {% if not user %}required{% endif %}>
+                        {% if user %}
+                        <div class="form-text">Leave blank to keep current password.</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="role" class="form-label">Role <span class="text-danger">*</span></label>
+                        <select class="form-select" id="role" name="role" required {% if user and user.username == 'admin' %}disabled{% endif %}>
+                            <option value="staff" {% if user and user.role == 'staff' %}selected{% endif %}>Staff</option>
+                            <option value="admin" {% if user and user.role == 'admin' %}selected{% endif %}>Admin</option>
+                        </select>
+                        {% if user and user.username == 'admin' %}
+                            <input type="hidden" name="role" value="admin">
+                        {% endif %}
+                    </div>
+                    
+                    {% if user %}
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="is_active" name="is_active" value="true" {% if user.is_active %}checked{% endif %} {% if user.username == 'admin' %}disabled{% endif %}>
+                        <label class="form-check-label" for="is_active">Active Account</label>
+                        {% if user.username == 'admin' %}
+                            <input type="hidden" name="is_active" value="true">
+                            <div class="form-text">The main admin account cannot be deactivated.</div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary">Save User</button>
+                        <a href="{{ url_for('routes.master_users') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
