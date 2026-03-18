@@ -7,8 +7,8 @@
 
 <div class="row">
     <div class="col-md-6 col-lg-4">
-        <div class="card shadow-sm">
-            <div class="card-body">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-body p-4">
                 <form method="POST">
                     <div class="mb-3">
                         <label for="username" class="form-label">Username <span class="text-danger">*</span></label>
@@ -50,9 +50,10 @@
                     </div>
                     {% endif %}
                     
+                    <hr class="my-4 text-muted">
                     <div class="mt-4">
-                        <button type="submit" class="btn btn-primary">Save User</button>
-                        <a href="{{ url_for('routes.master_users') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+                        <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm fw-semibold"><i class="fas fa-save me-2"></i>Save User</button>
+                        <a href="{{ url_for('routes.master_users') }}" class="btn btn-outline-secondary rounded-pill px-4 ms-2 fw-semibold">Cancel</a>
                     </div>
                 </form>
             </div>

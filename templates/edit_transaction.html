@@ -5,8 +5,8 @@
     <h1 class="h2">Edit Transaction: {{ tx.invoice_number }}</h1>
 </div>
 
-<div class="card shadow-sm mb-4">
-    <div class="card-body">
+<div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body p-4">
         <form method="POST" action="{{ url_for('routes.edit_transaction', id=tx.id) }}">
             <div class="row mb-3">
                 <div class="col-md-6 mb-3">
@@ -75,8 +75,9 @@
                 <textarea class="form-control" id="remark" name="remark" rows="2">{{ tx.remark or '' }}</textarea>
             </div>
 
-            <button type="submit" class="btn btn-primary">Update Transaction</button>
-            <a href="{{ url_for('routes.view_transactions') }}" class="btn btn-secondary text-white">Cancel</a>
+            <hr class="my-4 text-muted">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm fw-semibold"><i class="fas fa-save me-2"></i>Update Transaction</button>
+            <a href="{{ url_for('routes.view_transactions') }}" class="btn btn-outline-secondary rounded-pill px-4 ms-2 fw-semibold">Cancel</a>
         </form>
     </div>
 </div>

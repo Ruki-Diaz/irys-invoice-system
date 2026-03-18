@@ -8,9 +8,9 @@
 <div class="row row-cols-1 row-cols-md-2 g-4">
     <!-- Customer Statement -->
     <div class="col">
-        <div class="card h-100 shadow-sm border-0">
-            <div class="card-header bg-primary text-white">
-                <h5 class="card-title mb-0">Customer Statement (PDF)</h5>
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-primary-subtle text-primary-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">Customer Statement (PDF)</h5>
             </div>
             <div class="card-body">
                 <p class="card-text text-muted">Generate a consolidated statement for a specific customer, showing all their transactions and total outstanding balance.</p>
@@ -22,7 +22,7 @@
                         <option value="{{ c.id }}">{{ c.name }}</option>
                         {% endfor %}
                     </select>
-                    <button class="btn btn-outline-primary" type="button" id="btn_cust_statement">Generate PDF</button>
+                    <button class="btn btn-primary px-4 fw-semibold shadow-sm" type="button" id="btn_cust_statement"><i class="fas fa-file-pdf me-2"></i>Generate PDF</button>
                 </div>
             </div>
         </div>
@@ -30,9 +30,9 @@
 
     <!-- Outstanding Payments Report -->
     <div class="col">
-        <div class="card h-100 shadow-sm border-0">
-            <div class="card-header bg-danger text-white">
-                <h5 class="card-title mb-0">Outstanding Payments</h5>
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-danger-subtle text-danger-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">Outstanding Payments</h5>
             </div>
             <div class="card-body">
                 <p class="card-text text-muted mb-3">Generate a report of customers with an outstanding balance. Filter by specific customer and date range.</p>
@@ -75,8 +75,8 @@
 
                     <!-- Export Actions -->
                     <div class="d-flex gap-2">
-                        <button type="submit" name="format" value="pdf" class="btn btn-danger flex-fill">Generate PDF</button>
-                        <button type="submit" name="format" value="excel" class="btn btn-success flex-fill">Generate Excel</button>
+                        <button type="submit" name="format" value="pdf" class="btn btn-danger flex-fill rounded-pill fw-semibold shadow-sm"><i class="fas fa-file-pdf me-2"></i>Generate PDF</button>
+                        <button type="submit" name="format" value="excel" class="btn btn-success flex-fill rounded-pill fw-semibold shadow-sm"><i class="fas fa-file-excel me-2"></i>Generate Excel</button>
                     </div>
                 </form>
             </div>
@@ -85,26 +85,26 @@
 
     <!-- Summary Report -->
     <div class="col">
-        <div class="card h-100 shadow-sm border-0">
-            <div class="card-header bg-info text-white">
-                <h5 class="card-title mb-0">System Summary (PDF)</h5>
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-info-subtle text-info-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">System Summary (PDF)</h5>
             </div>
             <div class="card-body d-flex flex-column">
                 <p class="card-text text-muted">High-level snapshot of the entire system, showing total transactions, invoiced amounts, and payments.</p>
-                <a href="{{ url_for('routes.pdf_summary') }}" class="btn btn-info text-white mt-auto align-self-start">Generate PDF</a>
+                <a href="{{ url_for('routes.pdf_summary') }}" class="btn btn-info rounded-pill px-4 fw-semibold shadow-sm mt-auto align-self-start"><i class="fas fa-chart-pie me-2"></i>Generate PDF</a>
             </div>
         </div>
     </div>
 
     <!-- Excel Export -->
     <div class="col">
-        <div class="card h-100 shadow-sm border-0">
-            <div class="card-header bg-success text-white">
-                <h5 class="card-title mb-0">Export All Data (Excel)</h5>
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-success-subtle text-success-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">Export All Data (Excel)</h5>
             </div>
             <div class="card-body d-flex flex-column">
                 <p class="card-text text-muted">Download all transaction data to Microsoft Excel format (.xlsx) for custom analysis or backup.</p>
-                <a href="{{ url_for('routes.export_excel') }}" class="btn btn-success mt-auto align-self-start">Download Excel</a>
+                <a href="{{ url_for('routes.export_excel') }}" class="btn btn-success rounded-pill px-4 fw-semibold shadow-sm mt-auto align-self-start"><i class="fas fa-file-excel me-2"></i>Download Excel</a>
             </div>
         </div>
     </div>
