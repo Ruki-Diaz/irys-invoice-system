@@ -1,85 +1,47 @@
-# Phase 1: Review + Plan
+# Multi-Payment Invoice Logic - Implementation Plan
 
-## Current State Review
-**What is already working:**
-- Secure Login & Session Management (` Flask-Login `)
-- Dashboard overview with real-time aggregate metrics
-- Transaction Management (View, Add, Edit, Delete) with search & filters
-- Dropdowns dynamically populated from the database
-- Duplicate invoice number prevention and form validation
-- Confirmation prompts before deletion
-- Document generation: PDF (Customer Statement, Outstanding Payments, Summary) and Excel Exports
+This document outlines the strategy for safely adapting the Irys Invoice Management System to support multiple staggered payments against a single invoice number. 
 
-**What is missing / Application Next Steps:**
-- The original requirements are fully met, but currently the core entities (Customers, Salespeople, Payment Types, Bank Accounts) can only be added via the [init_db.py](file:///d:/Webapp/init_db.py) seed script or direct DB access.
-- We need Master Data Management to allow staff to add, rename, and disable these entities via the UI safely.
+The core mathematical principle for this update is simple: When an additional payment is recorded for an existing invoice, its `invoice_amount` will cleanly process as `0.0`. This guarantees that existing [sum(invoice_amount)](file:///d:/Webapp/routes.py#407-446) database calls powering your Dashboards, PDF reports, and Excel sheets will instantly aggregate the exact correct totals without any code rewrites.
 
-## Phase 2 Upgrade Plan: Master Data Management
+## Proposed Changes
 
-To introduce this without breaking any working feature, I propose adding incremental, isolated components.
+### 1. Database Schema Modification
+Currently, `Transaction.invoice_number` enforces SQL uniqueness (`unique=True`). We need to drop this constraint to allow a single invoice number to have multiple transaction row entries.
 
-1. **Routing Additions ([d:\Webapp\routes.py](file:///d:/Webapp/routes.py))**:
-   We will strictly append new routes to the bottom of the file. No existing routes will be modified.
-   - `/customers` (List, Add, Edit, Delete)
-   - `/salespersons` (List, Add, Edit, Delete)
-   - `/payment_types` (List, Add, Edit, Delete)
-   - `/bank_accounts` (List, Add, Edit, Delete)
-   
-   **Safety measure**: Before deleting any record, the route will explicitly query [Transaction](file:///d:/Webapp/models.py#34-51) to see if the ID is in use. If it is, a Flask flash message will gracefully stop the deletion: `"Cannot delete this Customer because they are associated with existing transactions."` We will also enforce uniqueness on the names/types during creation and modification.
+#### [MODIFY] [models.py](file:///d:/Webapp/models.py)
+- Remove `unique=True` from the `invoice_number` column definition in the [Transaction](file:///d:/Webapp/models.py#34-51) class.
 
-2. **Frontend Navigation ([d:\Webapp\templates\base.html](file:///d:/Webapp/templates/base.html))**:
-   - We will append a "Master Data" header in the existing sidebar.
-   - Add navigation active-state logic for the 4 new list pages.
+#### [NEW] `migrate_db.py`
+- Since SQLite does not natively support `ALTER TABLE ... DROP CONSTRAINT`, I will write a completely safe python script that uses `sqlite3` to:
+  1. Rename the existing [transactions](file:///d:/Webapp/routes.py#118-153) table to `transactions_old`.
+  2. Create a fresh [transactions](file:///d:/Webapp/routes.py#118-153) table identical to the original but without the `UNIQUE` index on the `invoice_number`.
+  3. `INSERT INTO transactions SELECT * FROM transactions_old`.
+  4. Drop the old table.
+- This guarantees zero data loss and takes less than a second to execute.
 
-3. **New Master Data Templates**:
-   - [templates/master_list.html](file:///d:/Webapp/templates/master_list.html): A flexible, generic template to display a table of records for any of the 4 entities, featuring "Edit" and "Delete" action buttons.
-   - [templates/master_form.html](file:///d:/Webapp/templates/master_form.html): A generic form template with a single text input to handle adding and renaming records.
-   *Using generic templates reduces code duplication and the risk of breaking UI components.*
+### 2. Transaction Backend Logic
+We need to safeguard user entry so that adding multiple payments is intuitive and mathematically sound.
 
-## Phase 3 Upgrade Plan: Admin-Managed User Accounts
+#### [MODIFY] [routes.py](file:///d:/Webapp/routes.py)
+- **In [add_transaction](file:///d:/Webapp/routes.py#66-117)**: 
+  - When the user submits the form, query if the `invoice_number` already exists.
+  - **Validation**: If it exists, verify the user selected the same [Customer](file:///d:/Webapp/models.py#14-18) as the original invoice. Deny entry if there is a mismatch.
+  - **Deduplication**: Automatically set `invoice_amount = 0.0` and flash a warning informing the user that the invoice amount was zeroed out to prevent skewing the global dashboard totals.
 
-To introduce role-based user management safely on top of the existing schema:
+### 3. User Interface Enhancements
+To properly represent the overall status of an invoice that may span several transaction rows.
 
-1. **Safe Database Migration**:
-   - Instead of breaking the existing `app.db`, I will run a raw SQLite query script ([migrate_users.py](file:///d:/Webapp/migrate_users.py)) to execute `ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'staff'` and `ADD COLUMN is_active BOOLEAN DEFAULT 1`.
-   - Update [models.py](file:///d:/Webapp/models.py) to include `role` and `is_active` fields.
-   - Update [init_db.py](file:///d:/Webapp/init_db.py) to ensure the original admin user gets the [admin](file:///d:/Webapp/routes.py#14-22) role explicitly.
+#### [MODIFY] [routes.py](file:///d:/Webapp/routes.py)
+- **In [view_transactions](file:///d:/Webapp/routes.py#118-153)**: Run a grouped SQLAlchemy query to calculate the `total_invoice_amount` and `total_payment_amount` explicitly grouped *by* `invoice_number` for all visible rows. Pass this dictionary to the template as `invoice_totals`.
 
-2. **Access Control ([d:\Webapp\routes.py](file:///d:/Webapp/routes.py))**:
-   - Update `/login` to check if `user.is_active`. If false, flash a message "Account is deactivated" and deny login.
-   - Create an `@admin_required` decorator that wraps existing `@login_required`. It will inspect `current_user.role`.
-   - Append new protected endpoints: `/master/users`, `/master/users/add`, `/master/users/edit/<id>`.
+#### [MODIFY] [templates/view_transactions.html](file:///d:/Webapp/templates/view_transactions.html)
+- Update the looping logic displaying the Status badge (Paid/Pending/Other).
+- Instead of calculating status based on the singular transaction row amount (`tx.invoice_amount > tx.payment_amount`), it will lookup the aggregated totals injected from the backend (`invoice_totals[tx.invoice_number]`) to show the true, accurate status of the entire invoice life-cycle.
 
-3. **User Interfaces and Templates**:
-   - Modify [d:\Webapp\templates\base.html](file:///d:/Webapp/templates/base.html) sidebar: wrap the new "Manage Users" link in an `{% if current_user.role == 'admin' %}` block so standard staff cannot see it.
-   - Create [d:\Webapp\templates\user_list.html](file:///d:/Webapp/templates/user_list.html): Table displaying username, role, and active status.
-   - Create [d:\Webapp\templates\user_form.html](file:///d:/Webapp/templates/user_form.html): Form handling creation and editing. Includes password setting only on creation (or specific explicit reset), and dropdowns for Role (Admin/Staff) and Status (Active/Inactive).
-
-## Phase 4 Upgrade Plan: Polish, Hardening & Deployment Prep
-
-To prepare this application for a real-company pilot release, we step through a comprehensive polish, hardening, and deployment phase.
-
-1. **Phase 4.1: UI/UX & UX Improvements**:
-   - Refactor [base.html](file:///d:/Webapp/templates/base.html) navigation to include branding "Invoice Management System" & "Finance Dashboard", highlight active tabs.
-   - Refactor [dashboard.html](file:///d:/Webapp/templates/dashboard.html) making the metric cards more professional.
-   - Sweep all tables (`transaction_list.html`, [master_list.html](file:///d:/Webapp/templates/master_list.html), [user_list.html](file:///d:/Webapp/templates/user_list.html)) to ensure they have `table-striped table-hover` and empty states ("No transactions yet").
-   - Enhance forms ([add_transaction.html](file:///d:/Webapp/templates/add_transaction.html), [master_form.html](file:///d:/Webapp/templates/master_form.html), etc.) for optimal spacing and [required](file:///d:/Webapp/routes.py#14-22) indicators.
-
-2. **Phase 4.2: PDF Improvements ([d:\Webapp\routes.py](file:///d:/Webapp/routes.py))**:
-   - Use `reportlab` or existing `fpdf2` logic to cleanly format PDF headers (Company Name / System Name) and format tables with proper alignment and totals at the bottom.
-   - Validate Excel generation ensuring filtered data maps correctly.
-
-3. **Phase 4.3: Security & Production Hardening**:
-   - Adjust [app.py](file:///d:/Webapp/app.py) / [routes.py](file:///d:/Webapp/routes.py) to pull `SECRET_KEY` from `os.environ` fallback logic.
-   - Disable Flask debug mode in production bindings (i.e., when deployed).
-   - Validation checks to ensure dropdowns cannot be bypassed with missing required fields.
-
-4. **Phase 4.4: Deployment Preparation**:
-   - Make [app.py](file:///d:/Webapp/app.py) bind to `0.0.0.0` and utilize `PORT` env var.
-   - Add `gunicorn` to [requirements.txt](file:///d:/Webapp/requirements.txt).
-   - Revise [README.md](file:///d:/Webapp/README.md) to cleanly map out steps for local running vs deploying to Render (PaaS).
-
-## User Review Required
-
-> [!IMPORTANT]  
-> Please review the Phase 4 upgrade plan. It covers UI/UX, PDF refinement, security hardening, and deployment prep (like Render/gunicorn instructions) without fundamentally rebuilding the internal Flask setup. Does this align with your expectations for the pilot?
+## Verification Plan
+1. **Migration Verification**: Run the migration script and verify the application boots successfully without database errors.
+2. **Transaction Insertion**: Add a "Test Invoice" for $1,000 to "Acme Corp" with a $500 payment. Status should be `Pending`.
+3. **Subsequent Payment**: Add another record using the same "Test Invoice" number for "Acme Corp". Put Invoice Amount as $1,000 and Payment as $500. Upon saving, verify a flash message indicates the invoice amount was zeroed.
+4. **Visual Verification**: Check the View Transactions table; both rows should now confidently declare the status as `Paid` because the system detected the aggregated sums matching ($1,000 invoiced, $1,000 heavily paid).
+5. **Report Verification**: Check the Dashboard to verify total outstanding balances were not artificially inflated.

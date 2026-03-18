@@ -36,7 +36,7 @@ class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False)
     salesperson_id = db.Column(db.Integer, db.ForeignKey('salespersons.id'), nullable=False)
-    invoice_number = db.Column(db.String(50), nullable=False, unique=True)
+    invoice_number = db.Column(db.String(50), nullable=False)
     date = db.Column(db.Date, nullable=False)
     invoice_amount = db.Column(db.Float, default=0.0)
     payment_amount = db.Column(db.Float, default=0.0)

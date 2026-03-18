@@ -79,12 +79,36 @@ def add_transaction():
             invoice_amount = float(request.form.get('invoice_amount') or 0.0)
             payment_amount = float(request.form.get('payment_amount') or 0.0)
             
-            # Check for duplicate invoice
-            invoice_number = request.form.get('invoice_number')
-            existing_tx = Transaction.query.filter_by(invoice_number=invoice_number).first()
-            if existing_tx:
-                flash(f'Invoice number {invoice_number} already exists.', 'danger')
+            if invoice_amount < 0 or payment_amount < 0:
+                flash('Amounts cannot be negative.', 'danger')
                 return redirect(request.url)
+            
+            # Check for existing invoice
+            invoice_number = request.form.get('invoice_number').strip()
+            
+            # Aggregate existing payments for this invoice
+            existing_txs = Transaction.query.filter_by(invoice_number=invoice_number).all()
+            
+            if existing_txs:
+                # It's a follow-up payment
+                original_tx = existing_txs[0]
+                
+                # Validation: ensure customer matches
+                if str(original_tx.customer_id) != request.form.get('customer_id'):
+                    flash(f'Invoice {invoice_number} belongs to a different customer ({original_tx.customer.name}).', 'danger')
+                    return redirect(request.url)
+                    
+                # Calculate total outstanding
+                total_invoiced = sum(t.invoice_amount for t in existing_txs)
+                total_paid = sum(t.payment_amount for t in existing_txs)
+                remaining = total_invoiced - total_paid
+                
+                if payment_amount > remaining:
+                    flash(f'Overpayment detected. Remaining balance for invoice {invoice_number} is only ${remaining:.2f}.', 'warning')
+                    
+                # Force invoice amount to 0 for follow-up payments
+                invoice_amount = 0.0
+                flash(f'Added follow-up payment for Invoice {invoice_number}.', 'info')
             
             tx = Transaction(
                 customer_id=request.form.get('customer_id'),
@@ -111,6 +135,26 @@ def add_transaction():
                            payment_types=payment_types, 
                            bank_accounts=bank_accounts)
 
+@routes_bp.route('/api/invoice_details/<path:invoice_number>', methods=['GET'])
+@login_required
+def invoice_details(invoice_number):
+    txs = Transaction.query.filter_by(invoice_number=invoice_number).all()
+    if not txs:
+        return {'exists': False}
+    
+    original_tx = txs[0]
+    total_invoiced = sum(t.invoice_amount for t in txs)
+    total_paid = sum(t.payment_amount for t in txs)
+    
+    return {
+        'exists': True,
+        'customer_id': original_tx.customer_id,
+        'customer_name': original_tx.customer.name,
+        'total_invoiced': total_invoiced,
+        'total_paid': total_paid,
+        'remaining_balance': total_invoiced - total_paid
+    }
+
 @routes_bp.route('/transactions', methods=['GET'])
 @login_required
 def view_transactions():
@@ -123,6 +167,7 @@ def view_transactions():
     filter_end = request.args.get('end_date', '')
     filter_sp = request.args.get('salesperson_id', '')
     filter_pt = request.args.get('payment_type_id', '')
+    filter_status = request.args.get('status', 'all')
     
     if search_cust:
         query = query.filter(Customer.name.ilike(f'%{search_cust}%'))
@@ -139,16 +184,40 @@ def view_transactions():
         
     transactions = query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     
+    # Calculate grouped invoice totals
+    from collections import defaultdict
+    invoice_totals = defaultdict(lambda: {'invoiced': 0.0, 'paid': 0.0, 'status': 'Pending'})
+    
+    # Needs to scan all transactions to get accurate totals, not just filtered ones
+    all_txs = Transaction.query.all()
+    for t in all_txs:
+        invoice_totals[t.invoice_number]['invoiced'] += t.invoice_amount
+        invoice_totals[t.invoice_number]['paid'] += t.payment_amount
+        
+    for inv, totals in invoice_totals.items():
+        if totals['paid'] >= totals['invoiced'] and totals['invoiced'] > 0:
+            totals['status'] = 'Paid'
+        elif totals['paid'] > 0 and totals['paid'] < totals['invoiced']:
+            totals['status'] = 'Partial'
+            
+    # Apply status filter efficiently post-query
+    if filter_status == 'paid':
+        transactions = [t for t in transactions if invoice_totals[t.invoice_number]['status'] == 'Paid']
+    elif filter_status == 'pending':
+        transactions = [t for t in transactions if invoice_totals[t.invoice_number]['status'] != 'Paid']
+    
     salespersons = Salesperson.query.order_by(Salesperson.name).all()
     payment_types = PaymentType.query.order_by(PaymentType.type_name).all()
     
     return render_template('view_transactions.html', 
                            transactions=transactions,
                            salespersons=salespersons,
-                           payment_types=payment_types)
+                           payment_types=payment_types,
+                           invoice_totals=dict(invoice_totals))
 
 @routes_bp.route('/transactions/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def edit_transaction(id):
     tx = Transaction.query.get_or_404(id)
     customers = Customer.query.order_by(Customer.name).all()
@@ -163,12 +232,18 @@ def edit_transaction(id):
             tx.invoice_amount = float(request.form.get('invoice_amount') or 0.0)
             tx.payment_amount = float(request.form.get('payment_amount') or 0.0)
             
+            if tx.invoice_amount < 0 or tx.payment_amount < 0:
+                flash('Amounts cannot be negative.', 'danger')
+                return redirect(request.url)
+            
             new_invoice_number = request.form.get('invoice_number')
             if new_invoice_number != tx.invoice_number:
-                existing_tx = Transaction.query.filter_by(invoice_number=new_invoice_number).first()
-                if existing_tx:
-                    flash(f'Invoice number {new_invoice_number} already exists.', 'danger')
-                    return redirect(request.url)
+                existing_txs = Transaction.query.filter_by(invoice_number=new_invoice_number).all()
+                if existing_txs:
+                    original_tx = existing_txs[0]
+                    if str(original_tx.customer_id) != request.form.get('customer_id'):
+                        flash(f'Cannot change to invoice {new_invoice_number}. It belongs to a different customer ({original_tx.customer.name}).', 'danger')
+                        return redirect(request.url)
             
             tx.invoice_number = new_invoice_number
             tx.customer_id = request.form.get('customer_id')
@@ -193,6 +268,7 @@ def edit_transaction(id):
 
 @routes_bp.route('/transactions/delete/<int:id>', methods=['POST'])
 @login_required
+@admin_required
 def delete_transaction(id):
     tx = Transaction.query.get_or_404(id)
     try:
@@ -213,10 +289,38 @@ def reports():
 @routes_bp.route('/export/excel')
 @login_required
 def export_excel():
-    transactions = Transaction.query.order_by(Transaction.date.desc()).all()
+    query = Transaction.query.join(Customer).join(Salesperson)
+    
+    # Apply identical Search / Filters
+    search_cust = request.args.get('customer_name', '')
+    search_inv = request.args.get('invoice_number', '')
+    filter_start = request.args.get('start_date', '')
+    filter_end = request.args.get('end_date', '')
+    filter_sp = request.args.get('salesperson_id', '')
+    filter_pt = request.args.get('payment_type_id', '')
+    
+    if search_cust:
+        query = query.filter(Customer.name.ilike(f'%{search_cust}%'))
+    if search_inv:
+        query = query.filter(Transaction.invoice_number.ilike(f'%{search_inv}%'))
+    if filter_start:
+        query = query.filter(Transaction.date >= datetime.strptime(filter_start, '%Y-%m-%d').date())
+    if filter_end:
+        query = query.filter(Transaction.date <= datetime.strptime(filter_end, '%Y-%m-%d').date())
+    if filter_sp:
+        query = query.filter(Transaction.salesperson_id == filter_sp)
+    if filter_pt:
+        query = query.filter(Transaction.payment_type_id == filter_pt)
+        
+    transactions = query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     
     data = []
+    total_invoice = 0
+    total_payment = 0
+    
     for tx in transactions:
+        total_invoice += tx.invoice_amount
+        total_payment += tx.payment_amount
         data.append({
             'Date': tx.date.strftime('%Y-%m-%d'),
             'Invoice Number': tx.invoice_number,
@@ -230,11 +334,21 @@ def export_excel():
             'Remark': tx.remark or ''
         })
         
-    df = pd.DataFrame(data)
+    df_trans = pd.DataFrame(data)
+    
+    # Summary Data
+    summary_data = [{
+        'Total Transactions': len(transactions),
+        'Total Invoiced': total_invoice,
+        'Total Paid': total_payment,
+        'Total Outstanding': total_invoice - total_payment
+    }]
+    df_summary = pd.DataFrame(summary_data)
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Transactions')
+        df_trans.to_excel(writer, index=False, sheet_name='Transactions')
+        df_summary.to_excel(writer, index=False, sheet_name='Summary')
     
     output.seek(0)
     return send_file(output, download_name='transactions.xlsx', as_attachment=True)
@@ -397,6 +511,162 @@ def pdf_summary():
     return send_file(output, download_name='summary_report.pdf', mimetype='application/pdf', as_attachment=True)
 
 
+@routes_bp.route('/export/outstanding', methods=['GET'])
+@login_required
+def export_outstanding():
+    mode = request.args.get('mode', 'all')
+    customer_id = request.args.get('customer_id')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    export_format = request.args.get('format', 'pdf')
+
+    query = db.session.query(
+        Customer.id.label('cust_id'),
+        Customer.name.label('cust_name'),
+        func.sum(Transaction.invoice_amount).label('tot_inv'),
+        func.sum(Transaction.payment_amount).label('tot_pay')
+    ).join(Transaction)
+
+    if start_date:
+        query = query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
+    if end_date:
+        query = query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
+
+    if mode == 'single' and customer_id:
+        query = query.filter(Customer.id == customer_id)
+
+    results = query.group_by(Customer.id).having(func.sum(Transaction.invoice_amount) - func.sum(Transaction.payment_amount) > 0).all()
+
+    if not results:
+        flash('No outstanding balances found for the selected criteria.', 'warning')
+        return redirect(url_for('routes.reports'))
+
+    if export_format == 'pdf':
+        pdf = PDFReport()
+        pdf.add_page()
+        
+        if mode == 'single' and customer_id:
+            row = results[0]
+            bal = (row.tot_inv or 0) - (row.tot_pay or 0)
+            pdf.set_font('Helvetica', 'B', 14)
+            pdf.cell(0, 10, f'Outstanding Statement: {row.cust_name}', 0, 1)
+            pdf.set_font('Helvetica', '', 11)
+            date_str = f"From: {start_date or 'Start'} To: {end_date or 'Today'}"
+            pdf.cell(0, 8, date_str, 0, 1)
+            pdf.cell(0, 8, f'Total Invoiced: ${row.tot_inv or 0:.2f}', 0, 1)
+            pdf.cell(0, 8, f'Total Paid: ${row.tot_pay or 0:.2f}', 0, 1)
+            pdf.cell(0, 8, f'Outstanding Balance: ${bal:.2f}', 0, 1)
+            pdf.ln(5)
+            
+            tx_query = Transaction.query.filter_by(customer_id=customer_id)
+            if start_date:
+                tx_query = tx_query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
+            if end_date:
+                tx_query = tx_query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
+            transactions = tx_query.order_by(Transaction.date).all()
+            
+            pdf.set_fill_color(240, 240, 240)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.cell(30, 8, 'Date', 1, 0, 'C', fill=True)
+            pdf.cell(35, 8, 'Invoice No', 1, 0, 'C', fill=True)
+            pdf.cell(35, 8, 'Inv Amount', 1, 0, 'R', fill=True)
+            pdf.cell(35, 8, 'Pay Amount', 1, 0, 'R', fill=True)
+            pdf.cell(55, 8, 'Remark', 1, 1, 'L', fill=True)
+            
+            pdf.set_font('Helvetica', '', 9)
+            for tx in transactions:
+                pdf.cell(30, 8, tx.date.strftime('%Y-%m-%d'), 1, 0, 'C')
+                pdf.cell(35, 8, tx.invoice_number, 1, 0, 'C')
+                pdf.cell(35, 8, f'${tx.invoice_amount:.2f}', 1, 0, 'R')
+                pdf.cell(35, 8, f'${tx.payment_amount:.2f}', 1, 0, 'R')
+                remark = (tx.remark[:30] + '..') if tx.remark and len(tx.remark) > 30 else (tx.remark or '')
+                pdf.cell(55, 8, remark, 1, 1, 'L')
+        else:
+            pdf.set_font('Helvetica', 'B', 14)
+            pdf.cell(0, 10, 'Outstanding Payments Report', 0, 1)
+            pdf.set_font('Helvetica', '', 10)
+            date_str = f"From: {start_date or 'All Time'} To: {end_date or 'Present'}"
+            pdf.cell(0, 6, f"Period: {date_str}", 0, 1)
+            pdf.ln(5)
+            
+            pdf.set_fill_color(240, 240, 240)
+            pdf.set_font('Helvetica', 'B', 10)
+            pdf.cell(75, 8, 'Customer', 1, 0, 'L', fill=True)
+            pdf.cell(40, 8, 'Total Invoiced', 1, 0, 'R', fill=True)
+            pdf.cell(40, 8, 'Total Paid', 1, 0, 'R', fill=True)
+            pdf.cell(35, 8, 'Balance', 1, 1, 'R', fill=True)
+            
+            pdf.set_font('Helvetica', '', 10)
+            total_balance = 0
+            for row in results:
+                inv = row.tot_inv or 0.0
+                pay = row.tot_pay or 0.0
+                bal = inv - pay
+                total_balance += bal
+                
+                pdf.cell(75, 8, row.cust_name, 1, 0, 'L')
+                pdf.cell(40, 8, f'${inv:.2f}', 1, 0, 'R')
+                pdf.cell(40, 8, f'${pay:.2f}', 1, 0, 'R')
+                pdf.cell(35, 8, f'${bal:.2f}', 1, 1, 'R')
+                
+            pdf.ln(5)
+            pdf.set_font('Helvetica', 'B', 11)
+            pdf.cell(0, 8, f'Total System Outstanding: ${total_balance:.2f}', 0, 1, 'R')
+
+        output = io.BytesIO()
+        pdf.output(output)
+        output.seek(0)
+        return send_file(output, download_name='outstanding_report.pdf', mimetype='application/pdf', as_attachment=True)
+
+    elif export_format == 'excel':
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            if mode == 'single' and customer_id:
+                row = results[0]
+                summary_data = [{
+                    'Customer': row.cust_name,
+                    'Total Invoiced': row.tot_inv or 0.0,
+                    'Total Paid': row.tot_pay or 0.0,
+                    'Outstanding Balance': (row.tot_inv or 0.0) - (row.tot_pay or 0.0),
+                    'Period Start': start_date or 'Start',
+                    'Period End': end_date or 'Today'
+                }]
+                pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='Summary')
+                
+                tx_query = Transaction.query.filter_by(customer_id=customer_id)
+                if start_date:
+                    tx_query = tx_query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
+                if end_date:
+                    tx_query = tx_query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
+                transactions = tx_query.order_by(Transaction.date).all()
+                
+                tx_data = []
+                for tx in transactions:
+                    tx_data.append({
+                        'Date': tx.date.strftime('%Y-%m-%d'),
+                        'Invoice Number': tx.invoice_number,
+                        'Invoice Amount': tx.invoice_amount,
+                        'Payment Amount': tx.payment_amount,
+                        'Remark': tx.remark or ''
+                    })
+                pd.DataFrame(tx_data).to_excel(writer, index=False, sheet_name='Transactions')
+                
+            else:
+                all_data = []
+                for row in results:
+                    inv = row.tot_inv or 0.0
+                    pay = row.tot_pay or 0.0
+                    all_data.append({
+                        'Customer': row.cust_name,
+                        'Total Invoiced': inv,
+                        'Total Paid': pay,
+                        'Outstanding Balance': inv - pay
+                    })
+                pd.DataFrame(all_data).to_excel(writer, index=False, sheet_name='Outstanding Balances')
+
+        output.seek(0)
+        return send_file(output, download_name='outstanding_report.xlsx', as_attachment=True)
+
 # ==========================================
 # PHASE 2: MASTER DATA MANAGEMENT ROUTES
 # ==========================================
@@ -404,6 +674,7 @@ def pdf_summary():
 # --- CUSTOMERS ---
 @routes_bp.route('/master/customers')
 @login_required
+@admin_required
 def master_customers():
     customers = Customer.query.order_by(Customer.name).all()
     # map to generic generic item structure
@@ -417,6 +688,7 @@ def master_customers():
 
 @routes_bp.route('/master/customers/add', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def add_customer():
     if request.method == 'POST':
         name = request.form.get('name_field').strip()
@@ -437,6 +709,7 @@ def add_customer():
 
 @routes_bp.route('/master/customers/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def edit_customer(id):
     customer = Customer.query.get_or_404(id)
     if request.method == 'POST':
@@ -461,6 +734,7 @@ def edit_customer(id):
 
 @routes_bp.route('/master/customers/delete/<int:id>', methods=['POST'])
 @login_required
+@admin_required
 def delete_customer(id):
     customer = Customer.query.get_or_404(id)
     # Protection against deleting referenced data
@@ -475,6 +749,7 @@ def delete_customer(id):
 # --- SALESPERSONS ---
 @routes_bp.route('/master/salespersons')
 @login_required
+@admin_required
 def master_salespersons():
     salespersons = Salesperson.query.order_by(Salesperson.name).all()
     items = [{'id': s.id, 'display_name': s.name} for s in salespersons]
@@ -487,6 +762,7 @@ def master_salespersons():
 
 @routes_bp.route('/master/salespersons/add', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def add_salesperson():
     if request.method == 'POST':
         name = request.form.get('name_field').strip()
@@ -507,6 +783,7 @@ def add_salesperson():
 
 @routes_bp.route('/master/salespersons/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def edit_salesperson(id):
     salesperson = Salesperson.query.get_or_404(id)
     if request.method == 'POST':
@@ -530,6 +807,7 @@ def edit_salesperson(id):
 
 @routes_bp.route('/master/salespersons/delete/<int:id>', methods=['POST'])
 @login_required
+@admin_required
 def delete_salesperson(id):
     salesperson = Salesperson.query.get_or_404(id)
     if Transaction.query.filter_by(salesperson_id=id).first():
@@ -543,6 +821,7 @@ def delete_salesperson(id):
 # --- PAYMENT TYPES ---
 @routes_bp.route('/master/payment_types')
 @login_required
+@admin_required
 def master_payment_types():
     payment_types = PaymentType.query.order_by(PaymentType.type_name).all()
     items = [{'id': pt.id, 'display_name': pt.type_name} for pt in payment_types]
@@ -555,6 +834,7 @@ def master_payment_types():
 
 @routes_bp.route('/master/payment_types/add', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def add_payment_type():
     if request.method == 'POST':
         name = request.form.get('name_field').strip()
@@ -575,6 +855,7 @@ def add_payment_type():
 
 @routes_bp.route('/master/payment_types/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def edit_payment_type(id):
     pt = PaymentType.query.get_or_404(id)
     if request.method == 'POST':
@@ -598,6 +879,7 @@ def edit_payment_type(id):
 
 @routes_bp.route('/master/payment_types/delete/<int:id>', methods=['POST'])
 @login_required
+@admin_required
 def delete_payment_type(id):
     pt = PaymentType.query.get_or_404(id)
     if Transaction.query.filter_by(payment_type_id=id).first():
@@ -611,6 +893,7 @@ def delete_payment_type(id):
 # --- BANK ACCOUNTS ---
 @routes_bp.route('/master/bank_accounts')
 @login_required
+@admin_required
 def master_bank_accounts():
     bank_accounts = BankAccount.query.order_by(BankAccount.account_name).all()
     items = [{'id': b.id, 'display_name': b.account_name} for b in bank_accounts]
@@ -623,6 +906,7 @@ def master_bank_accounts():
 
 @routes_bp.route('/master/bank_accounts/add', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def add_bank_account():
     if request.method == 'POST':
         name = request.form.get('name_field').strip()
@@ -643,6 +927,7 @@ def add_bank_account():
 
 @routes_bp.route('/master/bank_accounts/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
+@admin_required
 def edit_bank_account(id):
     ba = BankAccount.query.get_or_404(id)
     if request.method == 'POST':
@@ -666,6 +951,7 @@ def edit_bank_account(id):
 
 @routes_bp.route('/master/bank_accounts/delete/<int:id>', methods=['POST'])
 @login_required
+@admin_required
 def delete_bank_account(id):
     ba = BankAccount.query.get_or_404(id)
     if Transaction.query.filter_by(bank_account_id=id).first():

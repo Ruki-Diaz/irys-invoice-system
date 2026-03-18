@@ -32,11 +32,53 @@
     <div class="col">
         <div class="card h-100 shadow-sm border-0">
             <div class="card-header bg-danger text-white">
-                <h5 class="card-title mb-0">Outstanding Payments (PDF)</h5>
+                <h5 class="card-title mb-0">Outstanding Payments</h5>
             </div>
-            <div class="card-body d-flex flex-column">
-                <p class="card-text text-muted">A comprehensive overview of all customers who currently have an outstanding balance greater than zero.</p>
-                <a href="{{ url_for('routes.pdf_outstanding') }}" class="btn btn-danger mt-auto align-self-start">Generate PDF</a>
+            <div class="card-body">
+                <p class="card-text text-muted mb-3">Generate a report of customers with an outstanding balance. Filter by specific customer and date range.</p>
+                
+                <form id="outstanding_form" method="GET" action="{{ url_for('routes.export_outstanding') }}">
+                    <!-- Target Selection -->
+                    <div class="mb-3">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="mode" id="mode_all" value="all" checked onchange="toggleCustomerSelect()">
+                            <label class="form-check-label" for="mode_all">All Customers</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="mode" id="mode_single" value="single" onchange="toggleCustomerSelect()">
+                            <label class="form-check-label" for="mode_single">One Customer</label>
+                        </div>
+                    </div>
+
+                    <!-- Customer Dropdown (Hidden initially) -->
+                    <div class="mb-3" id="customer_select_group" style="display: none;">
+                        <label for="out_customer_id" class="form-label visually-hidden">Select Customer</label>
+                        <select class="form-select" id="out_customer_id" name="customer_id">
+                            <option value="">Select a customer...</option>
+                            {% for c in customers %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Date Range -->
+                    <div class="row g-2 mb-4">
+                        <div class="col-6">
+                            <label for="out_start" class="form-label small text-muted">From</label>
+                            <input type="date" class="form-control form-control-sm" id="out_start" name="start_date">
+                        </div>
+                        <div class="col-6">
+                            <label for="out_end" class="form-label small text-muted">To</label>
+                            <input type="date" class="form-control form-control-sm" id="out_end" name="end_date">
+                        </div>
+                    </div>
+
+                    <!-- Export Actions -->
+                    <div class="d-flex gap-2">
+                        <button type="submit" name="format" value="pdf" class="btn btn-danger flex-fill">Generate PDF</button>
+                        <button type="submit" name="format" value="excel" class="btn btn-success flex-fill">Generate Excel</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -69,6 +111,21 @@
 </div>
 
 <script>
+    function toggleCustomerSelect() {
+        const modeAll = document.getElementById('mode_all').checked;
+        const customerGroup = document.getElementById('customer_select_group');
+        const customerSelect = document.getElementById('out_customer_id');
+        
+        if (modeAll) {
+            customerGroup.style.display = 'none';
+            customerSelect.removeAttribute('required');
+        } else {
+            customerGroup.style.display = 'block';
+            customerSelect.setAttribute('required', 'required');
+        }
+    }
+
+    // Existing statement logic
     document.getElementById('btn_cust_statement').addEventListener('click', function() {
         const select = document.getElementById('cust_select');
         const custId = select.value;

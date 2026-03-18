@@ -12,6 +12,7 @@
                 <div class="col-md-6 mb-3">
                     <label for="invoice_number" class="form-label">Invoice Number <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="invoice_number" name="invoice_number" required>
+                    <div id="invoice_feedback" class="form-text text-primary" style="display: none;"></div>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label for="date" class="form-label">Date <span class="text-danger">*</span></label>
@@ -89,6 +90,54 @@
         if(!document.getElementById('date').value) {
             document.getElementById('date').valueAsDate = new Date();
         }
+    });
+
+    // Auto-fill and validation logic for existing invoices
+    document.getElementById('invoice_number').addEventListener('blur', function() {
+        const invNum = this.value.trim();
+        if(!invNum) return;
+
+        fetch(`/api/invoice_details/${encodeURIComponent(invNum)}`)
+            .then(res => res.json())
+            .then(data => {
+                const feedback = document.getElementById('invoice_feedback');
+                const invInput = document.getElementById('invoice_amount');
+                const payInput = document.getElementById('payment_amount');
+                const custSelect = document.getElementById('customer_id');
+
+                if(data.exists) {
+                    // This is a follow-up payment
+                    feedback.innerHTML = `<strong>Existing Invoice Found:</strong> ${data.customer_name}.<br>Remaining Balance: $${data.remaining_balance.toFixed(2)}`;
+                    feedback.style.display = 'block';
+
+                    // Lock invoice amount to 0
+                    invInput.value = 0;
+                    invInput.setAttribute('readonly', true);
+                    
+                    // Lock customer dropdown
+                    custSelect.value = data.customer_id;
+                    // Note: Instead of disabled (which drops it from POST), we enforce via backend, but we can visually disable pointer events
+                    custSelect.style.pointerEvents = 'none';
+                    custSelect.style.backgroundColor = '#e9ecef';
+
+                    // Auto-fill suggested payment if there's a balance
+                    if(data.remaining_balance > 0) {
+                        payInput.value = data.remaining_balance.toFixed(2);
+                    } else {
+                        payInput.value = 0;
+                        feedback.innerHTML += ' <span class="text-success">(Fully Paid)</span>';
+                    }
+                } else {
+                    // This is a new invoice
+                    feedback.style.display = 'none';
+                    invInput.removeAttribute('readonly');
+                    if(invInput.value == "0") invInput.value = ""; // Clear the 0 to prompt user
+
+                    custSelect.style.pointerEvents = 'auto';
+                    custSelect.style.backgroundColor = '';
+                }
+            })
+            .catch(err => console.error('Error fetching invoice API:', err));
     });
 </script>
 {% endblock %}
