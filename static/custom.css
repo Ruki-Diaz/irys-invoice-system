@@ -111,13 +111,100 @@ main {
 }
 
 @media (max-width: 767.98px) {
-    .sidebar {
-        position: static;
-        box-shadow: none;
-        padding-top: 0;
+    /* Prevent sidebar pushing by making it an overlay */
+    #sidebarMenu {
+        position: fixed;
+        top: 55px; /* Adjust below navbar */
+        left: 0;
+        width: 250px;
+        height: calc(100vh - 55px);
+        z-index: 1045;
+        background-color: var(--bs-body-bg) !important;
+        box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+        overflow-y: auto;
+    }
+    
+    [data-bs-theme="dark"] #sidebarMenu {
+        box-shadow: 4px 0 10px rgba(0,0,0,0.5);
     }
 
-    body {
-        padding-top: 0;
+    #sidebarMenu.collapsing {
+        transition: none;
+        display: none;
+    }
+
+    /* Navigation header fixes */
+    .navbar-brand {
+        white-space: nowrap;
+    }
+    
+    .navbar-brand .fw-bold {
+        font-size: 1rem; /* Scale down title */
+    }
+
+    /* Dashboard cards */
+    .card-body.p-4 {
+        padding: 1.25rem !important; /* reduce padding */
+    }
+    .display-6 {
+        font-size: 1.5rem; /* Smaller display numbers on cards */
+    }
+
+    /* Main container and typography */
+    main {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1rem !important;
+    }
+    
+    h1.h2 {
+        font-size: 1.5rem;
+        margin-top: 0.5rem;
+    }
+    
+    /* Table usability & Horizontal Scroll */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table-responsive.border {
+        border-left: 0 !important;
+        border-right: 0 !important;
+        border-radius: 0 !important;
+        margin-left: -1rem;
+        margin-right: -1rem;
+        width: calc(100% + 2rem);
+    }
+    
+    .table td, .table th {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+        white-space: nowrap; /* Prevent messy text wrapping */
+        font-size: 0.9rem; /* Increase data density */
+    }
+
+    /* Master Data / Transactions Action Button Fixes (Mobile Stacking) */
+    .table td .btn {
+        display: flex;
+        width: 100%;
+        margin-bottom: 0.5rem !important; /* Spacing between stacked buttons */
+        justify-content: center;
+        align-items: center;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+    
+    .table td .d-inline {
+        display: block !important; /* Break inline form wrappers to stack gracefully */
+        margin: 0;
+    }
+    
+    .table td form {
+        margin: 0;
+    }
+
+    .table td:last-child {
+        min-width: 110px; /* Ensure action column remains wide enough for the stacked buttons */
     }
 }
