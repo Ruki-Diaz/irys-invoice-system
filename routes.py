@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file
 from flask_login import login_user, login_required, logout_user, current_user
 from werkzeug.security import check_password_hash
-from models import db, User, Customer, Salesperson, PaymentType, BankAccount, Transaction
+from models import db, User, Customer, Salesperson, PaymentType, BankAccount
+import supabase_client as sc
 from sqlalchemy import func
 import pandas as pd
 import io
@@ -51,10 +52,11 @@ def logout():
 @routes_bp.route('/dashboard')
 @login_required
 def dashboard():
-    # Calculate summary metrics
-    total_tx = Transaction.query.count()
-    total_invoice = db.session.query(func.sum(Transaction.invoice_amount)).scalar() or 0.0
-    total_payment = db.session.query(func.sum(Transaction.payment_amount)).scalar() or 0.0
+    # Calculate summary metrics from Supabase
+    all_tx = sc.get_transactions()
+    total_tx = len(all_tx)
+    total_invoice = sum(float(t.get('invoice_amount') or 0.0) for t in all_tx)
+    total_payment = sum(float(t.get('payment_amount') or 0.0) for t in all_tx)
     total_outstanding = total_invoice - total_payment
     
     return render_template('dashboard.html', 
@@ -86,47 +88,54 @@ def add_transaction():
             # Check for existing invoice
             invoice_number = request.form.get('invoice_number').strip()
             
+            # Master data IDs vs Names mapping
+            # (We will store strings in Supabase so filters don't require JOIN logic later)
+            cust = Customer.query.get(request.form.get('customer_id'))
+            sp = Salesperson.query.get(request.form.get('salesperson_id'))
+            pt = PaymentType.query.get(request.form.get('payment_type_id')) if request.form.get('payment_type_id') else None
+            ba = BankAccount.query.get(request.form.get('bank_account_id')) if request.form.get('bank_account_id') else None
+
             # Aggregate existing payments for this invoice
-            existing_txs = Transaction.query.filter_by(invoice_number=invoice_number).all()
+            existing_txs = sc.get_transactions_by_invoice(invoice_number)
             
             if existing_txs:
                 # It's a follow-up payment
                 original_tx = existing_txs[0]
                 
                 # Validation: ensure customer matches
-                if str(original_tx.customer_id) != request.form.get('customer_id'):
-                    flash(f'Invoice {invoice_number} belongs to a different customer ({original_tx.customer.name}).', 'danger')
+                if original_tx.get('customer') != (cust.name if cust else None):
+                    flash(f'Invoice {invoice_number} belongs to a different customer ({original_tx.get("customer")}).', 'danger')
                     return redirect(request.url)
                     
                 # Calculate total outstanding
-                total_invoiced = sum(t.invoice_amount for t in existing_txs)
-                total_paid = sum(t.payment_amount for t in existing_txs)
+                total_invoiced = sum(float(t.get('invoice_amount') or 0) for t in existing_txs)
+                total_paid = sum(float(t.get('payment_amount') or 0) for t in existing_txs)
                 remaining = total_invoiced - total_paid
                 
                 if payment_amount > remaining:
                     flash(f'Overpayment detected. Remaining balance for invoice {invoice_number} is only ${remaining:.2f}.', 'warning')
+                    return redirect(request.url)
                     
                 # Force invoice amount to 0 for follow-up payments
                 invoice_amount = 0.0
                 flash(f'Added follow-up payment for Invoice {invoice_number}.', 'info')
             
-            tx = Transaction(
-                customer_id=request.form.get('customer_id'),
-                salesperson_id=request.form.get('salesperson_id'),
-                invoice_number=invoice_number,
-                date=tx_date,
-                invoice_amount=invoice_amount,
-                payment_amount=payment_amount,
-                payment_type_id=request.form.get('payment_type_id') or None,
-                bank_account_id=request.form.get('bank_account_id') or None,
-                remark=request.form.get('remark')
-            )
-            db.session.add(tx)
-            db.session.commit()
+            tx_data = {
+                'customer': cust.name if cust else None,
+                'salesperson': sp.name if sp else None,
+                'invoice_no': invoice_number,
+                'transaction_date': date_str,
+                'invoice_amount': invoice_amount,
+                'payment_amount': payment_amount,
+                'payment_type': pt.type_name if pt else None,
+                'bank_account': ba.account_name if ba else None,
+                'remark': request.form.get('remark')
+            }
+            
+            sc.add_transaction(tx_data)
             flash('Transaction added successfully.', 'success')
             return redirect(url_for('routes.view_transactions'))
         except Exception as e:
-            db.session.rollback()
             flash(f'Error adding transaction: {str(e)}', 'danger')
             
     return render_template('add_transaction.html', 
@@ -138,18 +147,21 @@ def add_transaction():
 @routes_bp.route('/api/invoice_details/<path:invoice_number>', methods=['GET'])
 @login_required
 def invoice_details(invoice_number):
-    txs = Transaction.query.filter_by(invoice_number=invoice_number).all()
+    txs = sc.get_transactions_by_invoice(invoice_number)
     if not txs:
         return {'exists': False}
     
     original_tx = txs[0]
-    total_invoiced = sum(t.invoice_amount for t in txs)
-    total_paid = sum(t.payment_amount for t in txs)
+    total_invoiced = sum(float(t.get('invoice_amount') or 0.0) for t in txs)
+    total_paid = sum(float(t.get('payment_amount') or 0.0) for t in txs)
+    
+    # lookup customer ID for UI dropdown
+    cust_match = Customer.query.filter_by(name=original_tx.get('customer')).first()
     
     return {
         'exists': True,
-        'customer_id': original_tx.customer_id,
-        'customer_name': original_tx.customer.name,
+        'customer_id': cust_match.id if cust_match else None,
+        'customer': original_tx.get('customer'),
         'total_invoiced': total_invoiced,
         'total_paid': total_paid,
         'remaining_balance': total_invoiced - total_paid
@@ -158,68 +170,58 @@ def invoice_details(invoice_number):
 @routes_bp.route('/transactions', methods=['GET'])
 @login_required
 def view_transactions():
-    query = Transaction.query.join(Customer).join(Salesperson)
-    
     # Search / Filters
+    filters = {}
     search_cust = request.args.get('customer_name', '')
     search_inv = request.args.get('invoice_number', '')
     filter_start = request.args.get('start_date', '')
     filter_end = request.args.get('end_date', '')
     filter_sp = request.args.get('salesperson_id', '')
-    filter_pt = request.args.get('payment_type_id', '')
-    filter_status = request.args.get('status', 'all')
+    # The UI probably provides salesperson_id but we filter by salesperson name or ID.
+    # We will pass salesperson_name to the filter if it exists.
     
     if search_cust:
-        query = query.filter(Customer.name.ilike(f'%{search_cust}%'))
+        filters['customer'] = search_cust
     if search_inv:
-        query = query.filter(Transaction.invoice_number.ilike(f'%{search_inv}%'))
+        filters['invoice_no'] = search_inv
     if filter_start:
-        query = query.filter(Transaction.date >= datetime.strptime(filter_start, '%Y-%m-%d').date())
+        filters['start_date'] = filter_start
     if filter_end:
-        query = query.filter(Transaction.date <= datetime.strptime(filter_end, '%Y-%m-%d').date())
+        filters['end_date'] = filter_end
     if filter_sp:
-        query = query.filter(Transaction.salesperson_id == filter_sp)
-    if filter_pt:
-        query = query.filter(Transaction.payment_type_id == filter_pt)
-        
-    transactions = query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
-    
-    # Calculate grouped invoice totals
-    from collections import defaultdict
-    invoice_totals = defaultdict(lambda: {'invoiced': 0.0, 'paid': 0.0, 'status': 'Pending'})
-    
-    # Needs to scan all transactions to get accurate totals, not just filtered ones
-    all_txs = Transaction.query.all()
-    for t in all_txs:
-        invoice_totals[t.invoice_number]['invoiced'] += t.invoice_amount
-        invoice_totals[t.invoice_number]['paid'] += t.payment_amount
-        
-    for inv, totals in invoice_totals.items():
-        if totals['paid'] >= totals['invoiced'] and totals['invoiced'] > 0:
-            totals['status'] = 'Paid'
-        elif totals['paid'] > 0 and totals['paid'] < totals['invoiced']:
-            totals['status'] = 'Partial'
+        sp = Salesperson.query.get(filter_sp)
+        if sp:
+            filters['salesperson'] = sp.name
             
-    # Apply status filter efficiently post-query
+    # Retrieve matching transactions
+    transactions = sc.get_transactions(filters)
+    # Calculate grouped invoice totals
+    invoice_totals = sc.get_invoice_totals(transactions)
+    
+    # Apply status filter
+    filter_status = request.args.get('status', 'all')
     if filter_status == 'paid':
-        transactions = [t for t in transactions if invoice_totals[t.invoice_number]['status'] == 'Paid']
+        invoice_totals = {k: v for k, v in invoice_totals.items() if v['status'] == 'Paid'}
     elif filter_status == 'pending':
-        transactions = [t for t in transactions if invoice_totals[t.invoice_number]['status'] != 'Paid']
+        invoice_totals = {k: v for k, v in invoice_totals.items() if v['status'] != 'Paid'}
     
     salespersons = Salesperson.query.order_by(Salesperson.name).all()
     payment_types = PaymentType.query.order_by(PaymentType.type_name).all()
     
     return render_template('view_transactions.html', 
-                           transactions=transactions,
                            salespersons=salespersons,
                            payment_types=payment_types,
-                           invoice_totals=dict(invoice_totals))
+                           invoice_totals=invoice_totals)
 
 @routes_bp.route('/transactions/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def edit_transaction(id):
-    tx = Transaction.query.get_or_404(id)
+    tx = sc.get_transaction_by_id(id)
+    if not tx:
+        flash('Transaction not found.', 'danger')
+        return redirect(url_for('routes.view_transactions'))
+        
     customers = Customer.query.order_by(Customer.name).all()
     salespersons = Salesperson.query.order_by(Salesperson.name).all()
     payment_types = PaymentType.query.order_by(PaymentType.type_name).all()
@@ -228,35 +230,47 @@ def edit_transaction(id):
     if request.method == 'POST':
         try:
             date_str = request.form.get('date')
-            tx.date = datetime.strptime(date_str, '%Y-%m-%d').date()
-            tx.invoice_amount = float(request.form.get('invoice_amount') or 0.0)
-            tx.payment_amount = float(request.form.get('payment_amount') or 0.0)
+            invoice_amount = float(request.form.get('invoice_amount') or 0.0)
+            payment_amount = float(request.form.get('payment_amount') or 0.0)
             
-            if tx.invoice_amount < 0 or tx.payment_amount < 0:
+            if invoice_amount < 0 or payment_amount < 0:
                 flash('Amounts cannot be negative.', 'danger')
                 return redirect(request.url)
             
             new_invoice_number = request.form.get('invoice_number')
-            if new_invoice_number != tx.invoice_number:
-                existing_txs = Transaction.query.filter_by(invoice_number=new_invoice_number).all()
+            cust = Customer.query.get(request.form.get('customer_id'))
+            sp = Salesperson.query.get(request.form.get('salesperson_id'))
+            pt = PaymentType.query.get(request.form.get('payment_type_id')) if request.form.get('payment_type_id') else None
+            ba = BankAccount.query.get(request.form.get('bank_account_id')) if request.form.get('bank_account_id') else None
+            
+            if new_invoice_number != tx.get('invoice_no'):
+                existing_txs = sc.get_transactions_by_invoice(new_invoice_number)
                 if existing_txs:
                     original_tx = existing_txs[0]
-                    if str(original_tx.customer_id) != request.form.get('customer_id'):
-                        flash(f'Cannot change to invoice {new_invoice_number}. It belongs to a different customer ({original_tx.customer.name}).', 'danger')
+                    if original_tx.get('customer') != (cust.name if cust else None):
+                        flash(f'Cannot change to invoice {new_invoice_number}. It belongs to a different customer ({original_tx.get("customer")}).', 'danger')
                         return redirect(request.url)
+            cust = Customer.query.get(request.form.get('customer_id'))
+            sp = Salesperson.query.get(request.form.get('salesperson_id'))
+            pt = PaymentType.query.get(request.form.get('payment_type_id')) if request.form.get('payment_type_id') else None
+            ba = BankAccount.query.get(request.form.get('bank_account_id')) if request.form.get('bank_account_id') else None
+
+            update_data = {
+                'invoice_no': new_invoice_number,
+                'customer': cust.name if cust else None,
+                'salesperson': sp.name if sp else None,
+                'transaction_date': date_str,
+                'invoice_amount': invoice_amount,
+                'payment_amount': payment_amount,
+                'payment_type': pt.type_name if pt else None,
+                'bank_account': ba.account_name if ba else None,
+                'remark': request.form.get('remark')
+            }
             
-            tx.invoice_number = new_invoice_number
-            tx.customer_id = request.form.get('customer_id')
-            tx.salesperson_id = request.form.get('salesperson_id')
-            tx.payment_type_id = request.form.get('payment_type_id') or None
-            tx.bank_account_id = request.form.get('bank_account_id') or None
-            tx.remark = request.form.get('remark')
-            
-            db.session.commit()
+            sc.update_transaction(id, update_data)
             flash('Transaction updated successfully.', 'success')
             return redirect(url_for('routes.view_transactions'))
         except Exception as e:
-            db.session.rollback()
             flash(f'Error updating transaction: {str(e)}', 'danger')
 
     return render_template('edit_transaction.html', 
@@ -270,13 +284,10 @@ def edit_transaction(id):
 @login_required
 @admin_required
 def delete_transaction(id):
-    tx = Transaction.query.get_or_404(id)
     try:
-        db.session.delete(tx)
-        db.session.commit()
+        sc.delete_transaction(id)
         flash('Transaction deleted successfully.', 'success')
     except Exception as e:
-        db.session.rollback()
         flash(f'Error deleting transaction: {str(e)}', 'danger')
     return redirect(url_for('routes.view_transactions'))
 
@@ -289,49 +300,49 @@ def reports():
 @routes_bp.route('/export/excel')
 @login_required
 def export_excel():
-    query = Transaction.query.join(Customer).join(Salesperson)
-    
     # Apply identical Search / Filters
+    filters = {}
     search_cust = request.args.get('customer_name', '')
     search_inv = request.args.get('invoice_number', '')
     filter_start = request.args.get('start_date', '')
     filter_end = request.args.get('end_date', '')
     filter_sp = request.args.get('salesperson_id', '')
-    filter_pt = request.args.get('payment_type_id', '')
     
     if search_cust:
-        query = query.filter(Customer.name.ilike(f'%{search_cust}%'))
+        filters['customer'] = search_cust
     if search_inv:
-        query = query.filter(Transaction.invoice_number.ilike(f'%{search_inv}%'))
+        filters['invoice_no'] = search_inv
     if filter_start:
-        query = query.filter(Transaction.date >= datetime.strptime(filter_start, '%Y-%m-%d').date())
+        filters['start_date'] = filter_start
     if filter_end:
-        query = query.filter(Transaction.date <= datetime.strptime(filter_end, '%Y-%m-%d').date())
+        filters['end_date'] = filter_end
     if filter_sp:
-        query = query.filter(Transaction.salesperson_id == filter_sp)
-    if filter_pt:
-        query = query.filter(Transaction.payment_type_id == filter_pt)
-        
-    transactions = query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
+        sp = Salesperson.query.get(filter_sp)
+        if sp:
+            filters['salesperson'] = sp.name
+            
+    transactions = sc.get_transactions(filters)
     
     data = []
     total_invoice = 0
     total_payment = 0
     
     for tx in transactions:
-        total_invoice += tx.invoice_amount
-        total_payment += tx.payment_amount
+        inv_amt = float(tx.get('invoice_amount') or 0.0)
+        pay_amt = float(tx.get('payment_amount') or 0.0)
+        total_invoice += inv_amt
+        total_payment += pay_amt
         data.append({
-            'Date': tx.date.strftime('%Y-%m-%d'),
-            'Invoice Number': tx.invoice_number,
-            'Customer': tx.customer.name,
-            'Salesperson': tx.salesperson.name,
-            'Invoice Amount': tx.invoice_amount,
-            'Payment Amount': tx.payment_amount,
-            'Outstanding': tx.invoice_amount - tx.payment_amount,
-            'Payment Type': tx.payment_type.type_name if tx.payment_type else '',
-            'Bank Account': tx.bank_account.account_name if tx.bank_account else '',
-            'Remark': tx.remark or ''
+            'Date': tx.get('transaction_date'),
+            'Invoice Number': tx.get('invoice_no'),
+            'Customer': tx.get('customer'),
+            'Salesperson': tx.get('salesperson'),
+            'Invoice Amount': inv_amt,
+            'Payment Amount': pay_amt,
+            'Outstanding': inv_amt - pay_amt,
+            'Payment Type': tx.get('payment_type') or '',
+            'Bank Account': tx.get('bank_account') or '',
+            'Remark': tx.get('remark') or ''
         })
         
     df_trans = pd.DataFrame(data)
@@ -380,10 +391,11 @@ class PDFReport(FPDF):
 @login_required
 def pdf_customer_statement(customer_id):
     customer = Customer.query.get_or_404(customer_id)
-    transactions = Transaction.query.filter_by(customer_id=customer_id).order_by(Transaction.date).all()
+    transactions = sc.get_transactions({'customer': customer.name})
+    transactions.sort(key=lambda x: x['transaction_date']) # sort asc
     
-    total_inv = sum(tx.invoice_amount for tx in transactions)
-    total_pay = sum(tx.payment_amount for tx in transactions)
+    total_inv = sum(float(tx.get('invoice_amount') or 0) for tx in transactions)
+    total_pay = sum(float(tx.get('payment_amount') or 0) for tx in transactions)
     balance = total_inv - total_pay
     
     pdf = PDFReport()
@@ -410,12 +422,15 @@ def pdf_customer_statement(customer_id):
     # Table Body
     pdf.set_font('Helvetica', '', 9)
     for tx in transactions:
-        pdf.cell(30, 8, tx.date.strftime('%Y-%m-%d'), 1, 0, 'C')
-        pdf.cell(35, 8, tx.invoice_number, 1, 0, 'C')
-        pdf.cell(35, 8, f'${tx.invoice_amount:.2f}', 1, 0, 'R')
-        pdf.cell(35, 8, f'${tx.payment_amount:.2f}', 1, 0, 'R')
+        pdf.cell(30, 8, tx.get('transaction_date'), 1, 0, 'C')
+        pdf.cell(35, 8, tx.get('invoice_no'), 1, 0, 'C')
+        inv_amt = float(tx.get('invoice_amount') or 0)
+        pay_amt = float(tx.get('payment_amount') or 0)
+        pdf.cell(35, 8, f'${inv_amt:.2f}', 1, 0, 'R')
+        pdf.cell(35, 8, f'${pay_amt:.2f}', 1, 0, 'R')
         # truncate remark
-        remark = (tx.remark[:30] + '..') if tx.remark and len(tx.remark) > 30 else (tx.remark or '')
+        remark_text = tx.get('remark') or ''
+        remark = (remark_text[:30] + '..') if len(remark_text) > 30 else remark_text
         pdf.cell(55, 8, remark, 1, 1, 'L')
         
     output = io.BytesIO()
@@ -426,12 +441,8 @@ def pdf_customer_statement(customer_id):
 @routes_bp.route('/export/pdf/outstanding')
 @login_required
 def pdf_outstanding():
-    # aggregate by customer
-    results = db.session.query(
-        Customer.name,
-        func.sum(Transaction.invoice_amount).label('tot_inv'),
-        func.sum(Transaction.payment_amount).label('tot_pay')
-    ).join(Transaction).group_by(Customer.id).having(func.sum(Transaction.invoice_amount) - func.sum(Transaction.payment_amount) > 0).all()
+    # aggregate by customer using Supabase
+    outstanding_data = sc.get_outstanding_by_customer()
     
     pdf = PDFReport()
     pdf.add_page()
@@ -450,13 +461,13 @@ def pdf_outstanding():
     # Table Body
     pdf.set_font('Helvetica', '', 10)
     total_balance = 0
-    for row in results:
-        inv = row.tot_inv or 0.0
-        pay = row.tot_pay or 0.0
-        bal = inv - pay
+    for cust_name, data in outstanding_data.items():
+        inv = data['tot_inv']
+        pay = data['tot_pay']
+        bal = data['balance']
         total_balance += bal
         
-        pdf.cell(75, 8, row.name, 1, 0, 'L')
+        pdf.cell(75, 8, cust_name, 1, 0, 'L')
         pdf.cell(40, 8, f'${inv:.2f}', 1, 0, 'R')
         pdf.cell(40, 8, f'${pay:.2f}', 1, 0, 'R')
         pdf.cell(35, 8, f'${bal:.2f}', 1, 1, 'R')
@@ -473,9 +484,10 @@ def pdf_outstanding():
 @routes_bp.route('/export/pdf/summary')
 @login_required
 def pdf_summary():
-    total_tx = Transaction.query.count()
-    total_inv = db.session.query(func.sum(Transaction.invoice_amount)).scalar() or 0.0
-    total_pay = db.session.query(func.sum(Transaction.payment_amount)).scalar() or 0.0
+    all_tx = sc.get_transactions()
+    total_tx = len(all_tx)
+    total_inv = sum(float(t.get('invoice_amount') or 0.0) for t in all_tx)
+    total_pay = sum(float(t.get('payment_amount') or 0.0) for t in all_tx)
     balance = total_inv - total_pay
     
     pdf = PDFReport()
@@ -520,24 +532,19 @@ def export_outstanding():
     end_date = request.args.get('end_date')
     export_format = request.args.get('format', 'pdf')
 
-    query = db.session.query(
-        Customer.id.label('cust_id'),
-        Customer.name.label('cust_name'),
-        func.sum(Transaction.invoice_amount).label('tot_inv'),
-        func.sum(Transaction.payment_amount).label('tot_pay')
-    ).join(Transaction)
-
-    if start_date:
-        query = query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
-    if end_date:
-        query = query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
-
+    filters = {}
+    if start_date: filters['start_date'] = start_date
+    if end_date: filters['end_date'] = end_date
+    
     if mode == 'single' and customer_id:
-        query = query.filter(Customer.id == customer_id)
+        cust = Customer.query.get(customer_id)
+        if cust:
+            filters['customer'] = cust.name
 
-    results = query.group_by(Customer.id).having(func.sum(Transaction.invoice_amount) - func.sum(Transaction.payment_amount) > 0).all()
+    transactions = sc.get_transactions(filters)
+    outstanding_data = sc.get_outstanding_by_customer(transactions)
 
-    if not results:
+    if not outstanding_data:
         flash('No outstanding balances found for the selected criteria.', 'warning')
         return redirect(url_for('routes.reports'))
 
@@ -546,24 +553,20 @@ def export_outstanding():
         pdf.add_page()
         
         if mode == 'single' and customer_id:
-            row = results[0]
-            bal = (row.tot_inv or 0) - (row.tot_pay or 0)
+            cust_name = list(outstanding_data.keys())[0]
+            data = outstanding_data[cust_name]
+            bal = data['balance']
             pdf.set_font('Helvetica', 'B', 14)
-            pdf.cell(0, 10, f'Outstanding Statement: {row.cust_name}', 0, 1)
+            pdf.cell(0, 10, f'Outstanding Statement: {cust_name}', 0, 1)
             pdf.set_font('Helvetica', '', 11)
             date_str = f"From: {start_date or 'Start'} To: {end_date or 'Today'}"
             pdf.cell(0, 8, date_str, 0, 1)
-            pdf.cell(0, 8, f'Total Invoiced: ${row.tot_inv or 0:.2f}', 0, 1)
-            pdf.cell(0, 8, f'Total Paid: ${row.tot_pay or 0:.2f}', 0, 1)
+            pdf.cell(0, 8, f'Total Invoiced: ${data["tot_inv"]:.2f}', 0, 1)
+            pdf.cell(0, 8, f'Total Paid: ${data["tot_pay"]:.2f}', 0, 1)
             pdf.cell(0, 8, f'Outstanding Balance: ${bal:.2f}', 0, 1)
             pdf.ln(5)
             
-            tx_query = Transaction.query.filter_by(customer_id=customer_id)
-            if start_date:
-                tx_query = tx_query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
-            if end_date:
-                tx_query = tx_query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
-            transactions = tx_query.order_by(Transaction.date).all()
+            transactions.sort(key=lambda x: x['transaction_date'])
             
             pdf.set_fill_color(240, 240, 240)
             pdf.set_font('Helvetica', 'B', 10)
@@ -575,11 +578,14 @@ def export_outstanding():
             
             pdf.set_font('Helvetica', '', 9)
             for tx in transactions:
-                pdf.cell(30, 8, tx.date.strftime('%Y-%m-%d'), 1, 0, 'C')
-                pdf.cell(35, 8, tx.invoice_number, 1, 0, 'C')
-                pdf.cell(35, 8, f'${tx.invoice_amount:.2f}', 1, 0, 'R')
-                pdf.cell(35, 8, f'${tx.payment_amount:.2f}', 1, 0, 'R')
-                remark = (tx.remark[:30] + '..') if tx.remark and len(tx.remark) > 30 else (tx.remark or '')
+                pdf.cell(30, 8, tx.get('transaction_date'), 1, 0, 'C')
+                pdf.cell(35, 8, tx.get('invoice_no'), 1, 0, 'C')
+                inv_amt = float(tx.get('invoice_amount') or 0)
+                pay_amt = float(tx.get('payment_amount') or 0)
+                pdf.cell(35, 8, f'${inv_amt:.2f}', 1, 0, 'R')
+                pdf.cell(35, 8, f'${pay_amt:.2f}', 1, 0, 'R')
+                remark_text = tx.get('remark') or ''
+                remark = (remark_text[:30] + '..') if len(remark_text) > 30 else remark_text
                 pdf.cell(55, 8, remark, 1, 1, 'L')
         else:
             pdf.set_font('Helvetica', 'B', 14)
@@ -598,13 +604,13 @@ def export_outstanding():
             
             pdf.set_font('Helvetica', '', 10)
             total_balance = 0
-            for row in results:
-                inv = row.tot_inv or 0.0
-                pay = row.tot_pay or 0.0
-                bal = inv - pay
+            for cust_name, data in outstanding_data.items():
+                inv = data['tot_inv']
+                pay = data['tot_pay']
+                bal = data['balance']
                 total_balance += bal
                 
-                pdf.cell(75, 8, row.cust_name, 1, 0, 'L')
+                pdf.cell(75, 8, cust_name, 1, 0, 'L')
                 pdf.cell(40, 8, f'${inv:.2f}', 1, 0, 'R')
                 pdf.cell(40, 8, f'${pay:.2f}', 1, 0, 'R')
                 pdf.cell(35, 8, f'${bal:.2f}', 1, 1, 'R')
@@ -622,45 +628,40 @@ def export_outstanding():
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             if mode == 'single' and customer_id:
-                row = results[0]
+                cust_name = list(outstanding_data.keys())[0]
+                data = outstanding_data[cust_name]
                 summary_data = [{
-                    'Customer': row.cust_name,
-                    'Total Invoiced': row.tot_inv or 0.0,
-                    'Total Paid': row.tot_pay or 0.0,
-                    'Outstanding Balance': (row.tot_inv or 0.0) - (row.tot_pay or 0.0),
+                    'Customer': cust_name,
+                    'Total Invoiced': data['tot_inv'],
+                    'Total Paid': data['tot_pay'],
+                    'Outstanding Balance': data['balance'],
                     'Period Start': start_date or 'Start',
                     'Period End': end_date or 'Today'
                 }]
                 pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='Summary')
                 
-                tx_query = Transaction.query.filter_by(customer_id=customer_id)
-                if start_date:
-                    tx_query = tx_query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
-                if end_date:
-                    tx_query = tx_query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
-                transactions = tx_query.order_by(Transaction.date).all()
-                
+                transactions.sort(key=lambda x: x['transaction_date'])
                 tx_data = []
                 for tx in transactions:
+                    inv_amt = float(tx.get('invoice_amount') or 0)
+                    pay_amt = float(tx.get('payment_amount') or 0)
                     tx_data.append({
-                        'Date': tx.date.strftime('%Y-%m-%d'),
-                        'Invoice Number': tx.invoice_number,
-                        'Invoice Amount': tx.invoice_amount,
-                        'Payment Amount': tx.payment_amount,
-                        'Remark': tx.remark or ''
+                        'Date': tx.get('transaction_date'),
+                        'Invoice Number': tx.get('invoice_no'),
+                        'Invoice Amount': inv_amt,
+                        'Payment Amount': pay_amt,
+                        'Remark': tx.get('remark') or ''
                     })
                 pd.DataFrame(tx_data).to_excel(writer, index=False, sheet_name='Transactions')
                 
             else:
                 all_data = []
-                for row in results:
-                    inv = row.tot_inv or 0.0
-                    pay = row.tot_pay or 0.0
+                for cust_name, data in outstanding_data.items():
                     all_data.append({
-                        'Customer': row.cust_name,
-                        'Total Invoiced': inv,
-                        'Total Paid': pay,
-                        'Outstanding Balance': inv - pay
+                        'Customer': cust_name,
+                        'Total Invoiced': data['tot_inv'],
+                        'Total Paid': data['tot_pay'],
+                        'Outstanding Balance': data['balance']
                     })
                 pd.DataFrame(all_data).to_excel(writer, index=False, sheet_name='Outstanding Balances')
 
@@ -738,7 +739,7 @@ def edit_customer(id):
 def delete_customer(id):
     customer = Customer.query.get_or_404(id)
     # Protection against deleting referenced data
-    if Transaction.query.filter_by(customer_id=id).first():
+    if sc.get_transactions({'customer': customer.name}):
         flash(f'Cannot delete Customer "{customer.name}" because they are linked to existing transactions.', 'danger')
     else:
         db.session.delete(customer)
@@ -810,7 +811,7 @@ def edit_salesperson(id):
 @admin_required
 def delete_salesperson(id):
     salesperson = Salesperson.query.get_or_404(id)
-    if Transaction.query.filter_by(salesperson_id=id).first():
+    if sc.get_transactions({'salesperson': salesperson.name}):
         flash(f'Cannot delete Salesperson "{salesperson.name}" because they are linked to existing transactions.', 'danger')
     else:
         db.session.delete(salesperson)
@@ -882,7 +883,7 @@ def edit_payment_type(id):
 @admin_required
 def delete_payment_type(id):
     pt = PaymentType.query.get_or_404(id)
-    if Transaction.query.filter_by(payment_type_id=id).first():
+    if any(tx.get('payment_type') == pt.type_name for tx in sc.get_transactions()):
         flash(f'Cannot delete Payment Type "{pt.type_name}" because it is linked to existing transactions.', 'danger')
     else:
         db.session.delete(pt)
@@ -954,7 +955,7 @@ def edit_bank_account(id):
 @admin_required
 def delete_bank_account(id):
     ba = BankAccount.query.get_or_404(id)
-    if Transaction.query.filter_by(bank_account_id=id).first():
+    if any(tx.get('bank_account') == ba.account_name for tx in sc.get_transactions()):
         flash(f'Cannot delete Bank Account "{ba.account_name}" because it is linked to existing transactions.', 'danger')
     else:
         db.session.delete(ba)

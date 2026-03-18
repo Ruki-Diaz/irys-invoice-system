@@ -7,3 +7,4 @@ fpdf2
 Werkzeug>=3.0.0
 python-dotenv
 gunicorn==21.2.0
+supabase>=2.3.0
