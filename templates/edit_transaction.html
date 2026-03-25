@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Edit Transaction: {{ tx.invoice_number }}</h1>
+</div>
+
+<div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body p-4">
+        <form method="POST" action="{{ url_for('routes.edit_transaction', id=tx.id) }}">
+            <div class="row mb-3">
+                <div class="col-md-6 mb-3">
+                    <label for="invoice_number" class="form-label">Invoice Number <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="invoice_number" name="invoice_number" value="{{ tx.invoice_number }}" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="date" class="form-label">Date <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="date" name="date" required value="{{ tx.date.strftime('%Y-%m-%d') }}">
+                </div>
+            </div>
+
+            <div class="row mb-3">
+                <div class="col-md-6 mb-3">
+                    <label for="customer_name" class="form-label">Customer <span class="text-danger">*</span></label>
+                    <select class="form-select" id="customer_name" name="customer_name" required onchange="if(this.value==='___OTHER___'){document.getElementById('new_customer_name_div').style.display='block';document.getElementById('new_customer_name').required=true;}else{document.getElementById('new_customer_name_div').style.display='none';document.getElementById('new_customer_name').required=false;}">
+                        <option value="">Select a customer...</option>
+                        {% set ns = namespace(found_customer=false) %}
+                        {% for customer in customers %}
+                        <option value="{{ customer.name }}" {% if tx.customer == customer.name %}selected{% set ns.found_customer = true %}{% endif %}>{{ customer.name }}</option>
+                        {% endfor %}
+                        {% if tx.customer and not ns.found_customer %}
+                        <option value="{{ tx.customer }}" selected>{{ tx.customer }} (Not in list)</option>
+                        {% endif %}
+                        <option value="___OTHER___">+ Add New / Other</option>
+                    </select>
+                    <div id="new_customer_name_div" class="mt-2" style="display: none;">
+                        <input type="text" class="form-control" id="new_customer_name" name="new_customer_name" placeholder="Enter new customer name">
+                    </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="salesperson_name" class="form-label">Salesperson <span class="text-danger">*</span></label>
+                    <select class="form-select" id="salesperson_name" name="salesperson_name" required onchange="if(this.value==='___OTHER___'){document.getElementById('new_salesperson_name_div').style.display='block';document.getElementById('new_salesperson_name').required=true;}else{document.getElementById('new_salesperson_name_div').style.display='none';document.getElementById('new_salesperson_name').required=false;}">
+                        <option value="">Select a salesperson...</option>
+                        {% set ns2 = namespace(found_sp=false) %}
+                        {% for salesperson in salespersons %}
+                        <option value="{{ salesperson.name }}" {% if tx.salesperson == salesperson.name %}selected{% set ns2.found_sp = true %}{% endif %}>{{ salesperson.name }}</option>
+                        {% endfor %}
+                        {% if tx.salesperson and not ns2.found_sp %}
+                        <option value="{{ tx.salesperson }}" selected>{{ tx.salesperson }} (Not in list)</option>
+                        {% endif %}
+                        <option value="___OTHER___">+ Add New / Other</option>
+                    </select>
+                    <div id="new_salesperson_name_div" class="mt-2" style="display: none;">
+                        <input type="text" class="form-control" id="new_salesperson_name" name="new_salesperson_name" placeholder="Enter new salesperson name">
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mb-3">
+                <div class="col-md-6 mb-3">
+                    <label for="invoice_amount" class="form-label">Invoice Amount (AED)</label>
+                    <input type="number" step="0.01" min="0" class="form-control" id="invoice_amount" name="invoice_amount" value="{{ '%.2f'|format(tx.invoice_amount) }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="payment_amount" class="form-label">Payment Amount (AED)</label>
+                    <input type="number" step="0.01" min="0" class="form-control" id="payment_amount" name="payment_amount" value="{{ '%.2f'|format(tx.payment_amount) }}">
+                </div>
+            </div>
+
+            <div class="row mb-3">
+                <div class="col-md-6 mb-3">
+                    <label for="payment_type_id" class="form-label">Payment Type</label>
+                    <select class="form-select" id="payment_type_id" name="payment_type_id">
+                        <option value="">None / Not Paid</option>
+                        {% for pt in payment_types %}
+                        <option value="{{ pt.id }}" {% if tx.payment_type_id == pt.id %}selected{% endif %}>{{ pt.type_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label for="bank_account_id" class="form-label">Bank Account</label>
+                    <select class="form-select" id="bank_account_id" name="bank_account_id">
+                        <option value="">None / N/A</option>
+                        {% for b in bank_accounts %}
+                        <option value="{{ b.id }}" {% if tx.bank_account_id == b.id %}selected{% endif %}>{{ b.account_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label for="remark" class="form-label">Remark / Notes</label>
+                <textarea class="form-control" id="remark" name="remark" rows="2">{{ tx.remark or '' }}</textarea>
+            </div>
+
+            <hr class="my-4 text-muted">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm fw-semibold"><i class="fas fa-save me-2"></i>Update Transaction</button>
+            <a href="{{ url_for('routes.view_transactions') }}" class="btn btn-outline-secondary rounded-pill px-4 ms-2 fw-semibold">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2 fw-bold">Dashboard</h1>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-4 mb-4 mt-2">
+    <div class="col">
+        <div class="card h-100 border-0 rounded-4 overflow-hidden card-hover bg-gradient-1">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Total Transactions</h6>
+                <h3 class="card-text display-6 fw-bold text-dark mb-0">{{ total_tx }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 border-0 rounded-4 overflow-hidden card-hover bg-gradient-2">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Total Invoiced</h6>
+                <h3 class="card-text display-6 fw-bold text-dark mb-0">{{ total_invoice | format_aed }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 border-0 rounded-4 overflow-hidden card-hover bg-gradient-3">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Total Payments</h6>
+                <h3 class="card-text display-6 fw-bold text-dark mb-0">{{ total_payment | format_aed }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card h-100 border-0 rounded-4 overflow-hidden card-hover bg-gradient-4">
+            <div class="card-body p-4">
+                <h6 class="card-title text-secondary text-uppercase fw-semibold mb-2">Outstanding Balance</h6>
+                <h3 class="card-text display-6 fw-bold text-danger mb-0">{{ total_outstanding | format_aed }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-header bg-transparent border-bottom-0 pt-4 pb-0">
+                <h5 class="mb-0 fw-bold">Quick Actions</h5>
+            </div>
+            <div class="card-body pt-3 pb-4">
+                <a href="{{ url_for('routes.add_transaction') }}" class="btn btn-primary rounded-pill px-4 me-2 mb-2 shadow-sm"><i class="fas fa-plus me-2"></i>Add New Transaction</a>
+                <a href="{{ url_for('routes.view_transactions') }}" class="btn btn-outline-secondary rounded-pill px-4 me-2 mb-2"><i class="fas fa-list me-2"></i>View All Records</a>
+                <a href="{{ url_for('routes.reports') }}" class="btn btn-outline-info rounded-pill px-4 me-2 mb-2"><i class="fas fa-file-invoice me-2"></i>Generate Reports</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

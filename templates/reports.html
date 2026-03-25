@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Reports & Exports</h1>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 g-4">
+    <!-- Customer Statement -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-primary-subtle text-primary-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">Customer Statement (PDF)</h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text text-muted">Generate a consolidated statement for a specific customer, showing all their transactions and total outstanding balance.</p>
+                
+                <div class="input-group mb-3 mt-4">
+                    <select class="form-select" id="cust_select">
+                        <option value="" selected disabled>Select a customer...</option>
+                        {% for c in customers %}
+                        <option value="{{ c.name }}">{{ c.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-primary px-4 fw-semibold shadow-sm" type="button" id="btn_cust_statement"><i class="fas fa-file-pdf me-2"></i>Generate PDF</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Outstanding Payments Report -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-danger-subtle text-danger-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">Outstanding Payments</h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text text-muted mb-3">Generate a report of customers with an outstanding balance. Filter by specific customer and date range.</p>
+                
+                <form id="outstanding_form" method="GET" action="{{ url_for('routes.export_outstanding') }}">
+                    <!-- Target Selection -->
+                    <div class="mb-3">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="mode" id="mode_all" value="all" checked onchange="toggleCustomerSelect()">
+                            <label class="form-check-label" for="mode_all">All Customers</label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="radio" name="mode" id="mode_single" value="single" onchange="toggleCustomerSelect()">
+                            <label class="form-check-label" for="mode_single">One Customer</label>
+                        </div>
+                    </div>
+
+                    <!-- Customer Dropdown (Hidden initially) -->
+                    <div class="mb-3" id="customer_select_group" style="display: none;">
+                        <label for="out_customer_id" class="form-label visually-hidden">Select Customer</label>
+                        <select class="form-select" id="out_customer_id" name="customer_name">
+                            <option value="">Select a customer...</option>
+                            {% for c in customers %}
+                            <option value="{{ c.name }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- Date Range -->
+                    <div class="row g-2 mb-4">
+                        <div class="col-6">
+                            <label for="out_start" class="form-label small text-muted">From</label>
+                            <input type="date" class="form-control form-control-sm" id="out_start" name="start_date">
+                        </div>
+                        <div class="col-6">
+                            <label for="out_end" class="form-label small text-muted">To</label>
+                            <input type="date" class="form-control form-control-sm" id="out_end" name="end_date">
+                        </div>
+                    </div>
+
+                    <!-- Export Actions -->
+                    <div class="d-flex gap-2">
+                        <button type="submit" name="format" value="pdf" class="btn btn-danger flex-fill rounded-pill fw-semibold shadow-sm"><i class="fas fa-file-pdf me-2"></i>Generate PDF</button>
+                        <button type="submit" name="format" value="excel" class="btn btn-success flex-fill rounded-pill fw-semibold shadow-sm"><i class="fas fa-file-excel me-2"></i>Generate Excel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Report -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-info-subtle text-info-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">System Summary (PDF)</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <p class="card-text text-muted">High-level snapshot of the entire system, showing total transactions, invoiced amounts, and payments.</p>
+                <a href="{{ url_for('routes.pdf_summary') }}" class="btn btn-info rounded-pill px-4 fw-semibold shadow-sm mt-auto align-self-start"><i class="fas fa-chart-pie me-2"></i>Generate PDF</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Excel Export -->
+    <div class="col">
+        <div class="card h-100 shadow-sm border-0 rounded-4">
+            <div class="card-header bg-success-subtle text-success-emphasis border-bottom-0 pt-3">
+                <h5 class="card-title fw-bold mb-0">Export All Data (Excel)</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <p class="card-text text-muted">Download all transaction data to Microsoft Excel format (.xlsx) for custom analysis or backup.</p>
+                <a href="{{ url_for('routes.export_excel') }}" class="btn btn-success rounded-pill px-4 fw-semibold shadow-sm mt-auto align-self-start"><i class="fas fa-file-excel me-2"></i>Download Excel</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleCustomerSelect() {
+        const modeAll = document.getElementById('mode_all').checked;
+        const customerGroup = document.getElementById('customer_select_group');
+        const customerSelect = document.getElementById('out_customer_id');
+        
+        if (modeAll) {
+            customerGroup.style.display = 'none';
+            customerSelect.removeAttribute('required');
+        } else {
+            customerGroup.style.display = 'block';
+            customerSelect.setAttribute('required', 'required');
+        }
+    }
+
+    // Existing statement logic
+    document.getElementById('btn_cust_statement').addEventListener('click', function() {
+        const select = document.getElementById('cust_select');
+        const custId = select.value;
+        if(custId) {
+            window.location.href = "{{ url_for('routes.pdf_customer_statement', customer_name='__CUST__') }}".replace('__CUST__', encodeURIComponent(custId));
+        } else {
+            alert('Please select a customer first.');
+        }
+    });
+</script>
+{% endblock %}
