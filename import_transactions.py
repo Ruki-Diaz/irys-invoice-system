@@ -64,15 +64,15 @@ def main():
         print(f"ERROR: Missing expected columns in sheet: {', '.join(missing)}")
         return
 
-    # Filter out completely empty rows based on Invoice Number
-    df = df.dropna(subset=['Invoice Number'], how='all')
-
     stats = {
         "read": 0,
         "customers_inserted": 0,
         "salespersons_inserted": 0,
         "transactions_inserted": 0,
-        "duplicates": 0,
+        "skipped_true_blank": 0,
+        "skipped_summary_total": 0,
+        "skipped_duplicates": 0,
+        "inserted_blank_invoice": 0,
         "errors": 0
     }
 
@@ -109,15 +109,62 @@ def main():
     if args.dry_run:
         print("\n=== DRY RUN MODE: No data will be written to the database ===\n")
 
+    last_valid_date = None
+
     for index, row in df.iterrows():
         stats["read"] += 1
+        excel_row_num = index + 2
         try:
             invoice_no = clean_string(row.get('Invoice Number'))
-            if not invoice_no:
-                continue
-
             customer = clean_string(row.get('Customer'))
             salesperson = clean_string(row.get('Salesperson'))
+            invoice_amount = clean_numeric(row.get('Invoice Amount'))
+            payment_amount = clean_numeric(row.get('Payment Amount'))
+            payment_type = clean_string(row.get('Payment Type')) or None
+            bank_account = clean_string(row.get('Bank Account')) or None
+            remark = clean_string(row.get('Remark')) or None
+            parsed_date = clean_date(row.get('Date'))
+            
+            # Stop condition 1: completely blank rows (true blanks)
+            is_completely_empty = not any([
+                invoice_no, customer, salesperson,
+                invoice_amount != 0.0, payment_amount != 0.0,
+                payment_type, bank_account, remark, parsed_date
+            ])
+            
+            if is_completely_empty:
+                stats["skipped_true_blank"] += 1
+                # print(f"Skipped row {excel_row_num}: true blank row") # kept silent to reduce noise
+                continue
+                
+            # Stop condition 2: Summary/Total rows
+            if "total" in invoice_no.lower() or "total" in customer.lower():
+                stats["skipped_summary_total"] += 1
+                print(f"Skipped row {excel_row_num}: summary row (detected 'Total')")
+                continue
+
+            # Fallback date logic
+            is_recovered_date = False
+            if parsed_date:
+                last_valid_date = parsed_date
+                final_date = parsed_date
+            else:
+                final_date = last_valid_date
+                is_recovered_date = True
+
+            if not final_date:
+                stats["errors"] += 1
+                print(f"ERROR on Excel row {excel_row_num}: Missing transaction date (and no previous date to fallback to).")
+                continue
+
+            # Tracking handles
+            handling_notes = []
+            if not invoice_no: 
+                handling_notes.append("blank invoice number")
+                stats["inserted_blank_invoice"] += 1
+            if not customer: handling_notes.append("blank customer")
+            if not salesperson: handling_notes.append("blank salesperson")
+            if is_recovered_date: handling_notes.append(f"filled blank date with {final_date}")
             
             # Master data insertion logic
             if customer and customer.lower() not in existing_customers:
@@ -141,18 +188,18 @@ def main():
                 "invoice_no": invoice_no,
                 "customer": customer,
                 "salesperson": salesperson,
-                "transaction_date": clean_date(row.get('Date')),
-                "invoice_amount": clean_numeric(row.get('Invoice Amount')),
-                "payment_amount": clean_numeric(row.get('Payment Amount')),
-                "payment_type": clean_string(row.get('Payment Type')) or None,
-                "bank_account": clean_string(row.get('Bank Account')) or None,
-                "remark": clean_string(row.get('Remark')) or None
+                "transaction_date": final_date,
+                "invoice_amount": invoice_amount,
+                "payment_amount": payment_amount,
+                "payment_type": payment_type,
+                "bank_account": bank_account,
+                "remark": remark
             }
 
             # Pre-flight duplicate check
             if is_exact_duplicate(tx_data):
-                stats["duplicates"] += 1
-                print(f"Skipped duplicate row: Invoice {invoice_no} | Date: {tx_data['transaction_date']} | Pay: {tx_data['payment_amount']}")
+                stats["skipped_duplicates"] += 1
+                # print(f"Skipped row {excel_row_num}: exact duplicate")
                 continue
 
             # Full insert transaction
@@ -166,24 +213,29 @@ def main():
                     
             stats["transactions_inserted"] += 1
             prefix = "[DRY-RUN] " if args.dry_run else ""
-            print(f"{prefix}Inserted Transaction: Invoice {invoice_no} | Customer: {customer} | AED {tx_data['payment_amount']}")
+            note_str = f" [{', '.join(handling_notes)}]" if handling_notes else ""
+            print(f"{prefix}Inserted valid row {excel_row_num}: Invoice '{invoice_no}' | Customer '{customer[:15]}' | AED {tx_data['payment_amount']}{note_str}")
 
         except Exception as e:
             stats["errors"] += 1
-            # Excel rows are 1-indexed, and header is row 1. DataFrame index 0 is row 2.
-            print(f"ERROR on Excel row {index + 2}: {e}")
+            print(f"ERROR on Excel row {excel_row_num}: {e}")
 
     # Final summary display
     print("\n" + "="*40)
     print("IMPORT SUMMARY")
     print("="*40)
-    print(f"Total rows read:       {stats['read']}")
-    print(f"Customers inserted:    {stats['customers_inserted']}")
-    print(f"Salespersons inserted: {stats['salespersons_inserted']}")
-    print(f"Transactions inserted: {stats['transactions_inserted']}")
-    print(f"Duplicates skipped:    {stats['duplicates']}")
-    print(f"Row errors:            {stats['errors']}")
+    print(f"Total rows read:           {stats['read']}")
+    print(f"Customers inserted:        {stats['customers_inserted']}")
+    print(f"Salespersons inserted:     {stats['salespersons_inserted']}")
+    print(f"Transactions inserted:     {stats['transactions_inserted']}")
+    print(f"  (Included blank inv):    {stats['inserted_blank_invoice']}")
+    print(f"Skipped (True Blank):      {stats['skipped_true_blank']}")
+    print(f"Skipped (Summary/Total):   {stats['skipped_summary_total']}")
+    print(f"Skipped (Exact Duplicates):{stats['skipped_duplicates']}")
+    print(f"Row errors:                {stats['errors']}")
     print("="*40)
+    print(f"Total valid tx accounted:  {stats['transactions_inserted'] + stats['skipped_duplicates']}")
+    
     if args.dry_run:
          print("This was a DRY RUN. No data was actually written to Supabase.")
 
