@@ -30,7 +30,7 @@ def get_transactions(filters=None):
              query = query.eq('salesperson', filters['salesperson'])
             
     response = query.order('transaction_date', desc=True).execute()
-    return response.data
+    return response.data or []
 
 def get_transaction_by_id(tx_id):
     response = supabase.table("transactions").select("*").eq("id", tx_id).execute()
@@ -40,7 +40,7 @@ def get_transaction_by_id(tx_id):
 
 def get_transactions_by_invoice(invoice_no):
     response = supabase.table("transactions").select("*").eq("invoice_no", invoice_no).execute()
-    return response.data
+    return response.data or []
 
 def delete_transaction(tx_id):
     supabase.table("transactions").delete().eq("id", tx_id).execute()
@@ -106,3 +106,58 @@ def get_outstanding_by_customer(transactions=None):
     # filter positive balances
     outstanding = {k: v for k, v in customer_totals.items() if v['balance'] > 0}
     return outstanding
+
+
+# --- Customers ---
+def get_customers():
+    response = supabase.table("customers").select("*").order("name").execute()
+    return response.data or []
+
+def get_customer_by_id(cust_id):
+    response = supabase.table("customers").select("*").eq("id", cust_id).execute()
+    if response.data:
+        return response.data[0]
+    return None
+
+def update_customer(cust_id, name):
+    supabase.table("customers").update({"name": name}).eq("id", cust_id).execute()
+
+def delete_customer(cust_id):
+    supabase.table("customers").delete().eq("id", cust_id).execute()
+
+def ensure_customer(name):
+    if not name:
+        return None
+    name = name.strip()
+    existing = supabase.table("customers").select("*").ilike("name", name).execute().data
+    if not existing:
+        supabase.table("customers").insert({"name": name}).execute()
+    return name
+
+
+# --- Salespersons ---
+def get_salespersons():
+    response = supabase.table("salespersons").select("*").order("name").execute()
+    return response.data or []
+
+def get_salesperson_by_id(sp_id):
+    response = supabase.table("salespersons").select("*").eq("id", sp_id).execute()
+    if response.data:
+        return response.data[0]
+    return None
+
+def update_salesperson(sp_id, name):
+    supabase.table("salespersons").update({"name": name}).eq("id", sp_id).execute()
+
+def delete_salesperson(sp_id):
+    supabase.table("salespersons").delete().eq("id", sp_id).execute()
+
+def ensure_salesperson(name):
+    if not name:
+        return None
+    name = name.strip()
+    existing = supabase.table("salespersons").select("*").ilike("name", name).execute().data
+    if not existing:
+        supabase.table("salespersons").insert({"name": name}).execute()
+    return name
+

@@ -1,0 +1,7 @@
+# Invoice & Payment App
+
+[BizManager](http://127.0.0.1:5000/)
+[Sign out](http://127.0.0.1:5000/logout)
+
+## System Login
+BizManager ©
