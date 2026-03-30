@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-    <h1 class="h2">Edit Transaction: {{ tx.invoice_number }}</h1>
+    <h1 class="h2">Edit Transaction: {{ tx.invoice_no }}</h1>
 </div>
 
 <div class="card shadow-sm border-0 rounded-4 mb-4">
@@ -11,11 +11,11 @@
             <div class="row mb-3">
                 <div class="col-md-6 mb-3">
                     <label for="invoice_number" class="form-label">Invoice Number <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control" id="invoice_number" name="invoice_number" value="{{ tx.invoice_number }}" required>
+                    <input type="text" class="form-control" id="invoice_number" name="invoice_number" value="{{ tx.invoice_no }}" required>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label for="date" class="form-label">Date <span class="text-danger">*</span></label>
-                    <input type="date" class="form-control" id="date" name="date" required value="{{ tx.date.strftime('%Y-%m-%d') }}">
+                    <input type="date" class="form-control" id="date" name="date" required value="{{ tx.transaction_date }}">
                 </div>
             </div>
 
@@ -73,7 +73,7 @@
                     <select class="form-select" id="payment_type_id" name="payment_type_id">
                         <option value="">None / Not Paid</option>
                         {% for pt in payment_types %}
-                        <option value="{{ pt.id }}" {% if tx.payment_type_id == pt.id %}selected{% endif %}>{{ pt.type_name }}</option>
+                        <option value="{{ pt.id }}" {% if tx.payment_type == pt.type_name %}selected{% endif %}>{{ pt.type_name }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -82,15 +82,22 @@
                     <select class="form-select" id="bank_account_id" name="bank_account_id">
                         <option value="">None / N/A</option>
                         {% for b in bank_accounts %}
-                        <option value="{{ b.id }}" {% if tx.bank_account_id == b.id %}selected{% endif %}>{{ b.account_name }}</option>
+                        <option value="{{ b.id }}" {% if tx.bank_account == b.account_name %}selected{% endif %}>{{ b.account_name }}</option>
                         {% endfor %}
                     </select>
                 </div>
             </div>
 
             <div class="mb-4">
-                <label for="remark" class="form-label">Remark / Notes</label>
-                <textarea class="form-control" id="remark" name="remark" rows="2">{{ tx.remark or '' }}</textarea>
+                <label for="remark_type" class="form-label">Remark / Notes</label>
+                {% set r = tx.remark or '' %}
+                {% set r_type = 'Invoice' if r == 'Invoice' else ('Payment' if r == 'Payment' else 'Other') %}
+                <select class="form-select mb-2" id="remark_type" name="remark_type" onchange="toggleRemarkCustom(this.value)">
+                    <option value="Invoice" {% if r_type == 'Invoice' %}selected{% endif %}>Invoice</option>
+                    <option value="Payment" {% if r_type == 'Payment' %}selected{% endif %}>Payment</option>
+                    <option value="Other" {% if r_type == 'Other' %}selected{% endif %}>Other</option>
+                </select>
+                <input type="text" class="form-control" id="remark_custom" name="remark_custom" placeholder="Enter custom remark" value="{{ r if r_type == 'Other' else '' }}" style="display: {% if r_type == 'Other' %}block{% else %}none{% endif %};">
             </div>
 
             <hr class="my-4 text-muted">
@@ -99,4 +106,21 @@
         </form>
     </div>
 </div>
+
+<script>
+    function toggleRemarkCustom(val) {
+        const customInput = document.getElementById('remark_custom');
+        if (val === 'Other') {
+            customInput.style.display = 'block';
+            customInput.required = true;
+        } else {
+            customInput.style.display = 'none';
+            customInput.required = false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        toggleRemarkCustom(document.getElementById('remark_type').value);
+    });
+</script>
 {% endblock %}

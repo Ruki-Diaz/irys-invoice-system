@@ -82,8 +82,13 @@
             </div>
 
             <div class="mb-4">
-                <label for="remark" class="form-label">Remark / Notes</label>
-                <textarea class="form-control" id="remark" name="remark" rows="2"></textarea>
+                <label for="remark_type" class="form-label">Remark / Notes</label>
+                <select class="form-select mb-2" id="remark_type" name="remark_type" onchange="toggleRemarkCustom(this.value)">
+                    <option value="Invoice">Invoice</option>
+                    <option value="Payment">Payment</option>
+                    <option value="Other">Other</option>
+                </select>
+                <input type="text" class="form-control" id="remark_custom" name="remark_custom" placeholder="Enter custom remark" style="display: none;">
             </div>
 
             <hr class="my-4 text-muted">
@@ -94,11 +99,23 @@
 </div>
 
 <script>
+    function toggleRemarkCustom(val) {
+        const customInput = document.getElementById('remark_custom');
+        if (val === 'Other') {
+            customInput.style.display = 'block';
+            customInput.required = true;
+        } else {
+            customInput.style.display = 'none';
+            customInput.required = false;
+        }
+    }
+
     // Set today's date as default
     document.addEventListener('DOMContentLoaded', function() {
         if(!document.getElementById('date').value) {
             document.getElementById('date').valueAsDate = new Date();
         }
+        toggleRemarkCustom(document.getElementById('remark_type').value);
     });
 
     // Auto-fill and validation logic for existing invoices

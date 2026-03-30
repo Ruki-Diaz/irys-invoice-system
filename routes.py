@@ -8,6 +8,8 @@ import pandas as pd
 import io
 from fpdf import FPDF
 from datetime import datetime
+import traceback
+import logging
 from functools import wraps
 
 routes_bp = Blueprint('routes', __name__)
@@ -129,6 +131,15 @@ def add_transaction():
                 invoice_amount = 0.0
                 flash(f'Added follow-up payment for Invoice {invoice_number}.', 'info')
             
+            remark_type = request.form.get('remark_type')
+            if remark_type == 'Invoice':
+                final_remark = 'Invoice'
+            elif remark_type == 'Payment':
+                final_remark = 'Payment'
+            else:
+                custom_val = request.form.get('remark_custom')
+                final_remark = custom_val.strip() if custom_val else ''
+
             tx_data = {
                 'customer': final_cust_name,
                 'salesperson': final_sp_name,
@@ -138,7 +149,7 @@ def add_transaction():
                 'payment_amount': payment_amount,
                 'payment_type': pt.type_name if pt else None,
                 'bank_account': ba.account_name if ba else None,
-                'remark': request.form.get('remark')
+                'remark': final_remark
             }
             
             sc.add_transaction(tx_data)
@@ -218,9 +229,15 @@ def view_transactions():
 @login_required
 @admin_required
 def edit_transaction(id):
-    tx = sc.get_transaction_by_id(id)
-    if not tx:
-        flash('Transaction not found.', 'danger')
+    logging.info(f"Accessing edit_transaction for ID: {id}")
+    try:
+        tx = sc.get_transaction_by_id(id)
+        if not tx:
+            flash('Transaction not found.', 'danger')
+            return redirect(url_for('routes.view_transactions'))
+    except Exception as e:
+        logging.error(f"Error fetching transaction {id}: {e}\n{traceback.format_exc()}")
+        flash('An error occurred while fetching the transaction.', 'danger')
         return redirect(url_for('routes.view_transactions'))
         
     customers = sc.get_customers()
@@ -231,8 +248,11 @@ def edit_transaction(id):
     if request.method == 'POST':
         try:
             date_str = request.form.get('date')
-            invoice_amount = float(request.form.get('invoice_amount') or 0.0)
-            payment_amount = float(request.form.get('payment_amount') or 0.0)
+            invoice_amount_str = request.form.get('invoice_amount')
+            payment_amount_str = request.form.get('payment_amount')
+            
+            invoice_amount = float(invoice_amount_str) if invoice_amount_str else 0.0
+            payment_amount = float(payment_amount_str) if payment_amount_str else 0.0
             
             if invoice_amount < 0 or payment_amount < 0:
                 flash('Amounts cannot be negative.', 'danger')
@@ -246,9 +266,13 @@ def edit_transaction(id):
             sp_name = request.form.get('salesperson_name')
             if sp_name == '___OTHER___':
                 sp_name = request.form.get('new_salesperson_name')
-                
-            pt = PaymentType.query.get(request.form.get('payment_type_id')) if request.form.get('payment_type_id') else None
-            ba = BankAccount.query.get(request.form.get('bank_account_id')) if request.form.get('bank_account_id') else None
+            
+            payment_type_id = request.form.get('payment_type_id')
+            bank_account_id = request.form.get('bank_account_id')
+            
+            if not new_invoice_number:
+                flash('Invoice number is required.', 'danger')
+                return redirect(request.url)
             
             if new_invoice_number != tx.get('invoice_no'):
                 existing_txs = sc.get_transactions_by_invoice(new_invoice_number)
@@ -257,10 +281,20 @@ def edit_transaction(id):
                     if original_tx.get('customer') != sc.ensure_customer(cust_name):
                         flash(f'Cannot change to invoice {new_invoice_number}. It belongs to a different customer ({original_tx.get("customer")}).', 'danger')
                         return redirect(request.url)
+            
             final_cust_name = sc.ensure_customer(cust_name)
             final_sp_name = sc.ensure_salesperson(sp_name)
-            pt = PaymentType.query.get(request.form.get('payment_type_id')) if request.form.get('payment_type_id') else None
-            ba = BankAccount.query.get(request.form.get('bank_account_id')) if request.form.get('bank_account_id') else None
+            pt = PaymentType.query.get(payment_type_id) if payment_type_id else None
+            ba = BankAccount.query.get(bank_account_id) if bank_account_id else None
+
+            remark_type = request.form.get('remark_type')
+            if remark_type == 'Invoice':
+                final_remark = 'Invoice'
+            elif remark_type == 'Payment':
+                final_remark = 'Payment'
+            else:
+                custom_val = request.form.get('remark_custom')
+                final_remark = custom_val.strip() if custom_val else ''
 
             update_data = {
                 'invoice_no': new_invoice_number,
@@ -271,17 +305,40 @@ def edit_transaction(id):
                 'payment_amount': payment_amount,
                 'payment_type': pt.type_name if pt else None,
                 'bank_account': ba.account_name if ba else None,
-                'remark': request.form.get('remark')
+                'remark': final_remark
             }
             
+            logging.info(f"Updating transaction {id} with payload: {update_data}")
             sc.update_transaction(id, update_data)
             flash('Transaction updated successfully.', 'success')
             return redirect(url_for('routes.view_transactions'))
         except Exception as e:
+            logging.error(f"Error updating transaction {id}: {e}\n{traceback.format_exc()}")
             flash(f'Error updating transaction: {str(e)}', 'danger')
 
+    # Safe normalization for GET
+    safe_tx = {
+        'id': tx.get('id'),
+        'invoice_no': tx.get('invoice_no') or '',
+        'transaction_date': tx.get('transaction_date') or '',
+        'customer': tx.get('customer') or '',
+        'salesperson': tx.get('salesperson') or '',
+        'invoice_amount': float(tx.get('invoice_amount') or 0.0),
+        'payment_amount': float(tx.get('payment_amount') or 0.0),
+        'payment_type': tx.get('payment_type') or '',
+        'bank_account': tx.get('bank_account') or '',
+        'remark': tx.get('remark') or ''
+    }
+    
+    if safe_tx['transaction_date']:
+        try:
+            dt = datetime.strptime(safe_tx['transaction_date'].split('T')[0], '%Y-%m-%d')
+            safe_tx['transaction_date'] = dt.strftime('%Y-%m-%d')
+        except ValueError:
+            pass
+
     return render_template('edit_transaction.html', 
-                           tx=tx, 
+                           tx=safe_tx, 
                            customers=customers, 
                            salespersons=salespersons, 
                            payment_types=payment_types, 
