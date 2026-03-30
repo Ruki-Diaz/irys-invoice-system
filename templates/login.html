@@ -1,30 +1,82 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6 col-lg-4 mt-5">
-        <div class="card shadow border-0 mt-5 rounded-4">
-            <div class="card-body p-5 text-center">
-                <div class="mb-4 text-primary">
-                    <i class="fas fa-file-invoice-dollar fa-3x"></i>
+<div class="container d-flex flex-column justify-content-center align-items-center min-vh-100" style="margin-top: -60px;">
+    <!-- Centered Card -->
+    <div class="card shadow-lg border-0 rounded-4 overflow-hidden" style="max-width: 450px; width: 100%; background: var(--bs-card-bg);">
+        <div class="card-body p-sm-5 p-4">
+            
+            <!-- Logo Section -->
+            <div class="text-center mb-4">
+                <img src="{{ url_for('static', filename='images/irys_pte_ltd_logo.jpg') }}" alt="Irys Logo" class="img-fluid rounded mb-3 shadow-sm" style="max-height: 85px; object-fit: contain;">
+                <h4 class="fw-bold mb-1">Irys Invoice System</h4>
+                <p class="text-muted small mb-0">Smart finance and transaction management</p>
+            </div>
+
+            <!-- Intro Text -->
+            <div class="text-center mb-4 pt-2">
+                <h5 class="fw-semibold mb-1">Welcome back</h5>
+                <p class="text-muted small mb-0">Sign in to continue to your dashboard</p>
+            </div>
+
+            <!-- Form -->
+            <form method="POST" action="{{ url_for('routes.login') }}">
+                <div class="form-floating mb-3">
+                    <input type="text" class="form-control bg-transparent border-secondary" id="username" name="username" placeholder="Username" required autofocus>
+                    <label for="username" class="text-muted"><i class="fas fa-user me-2"></i>Username</label>
                 </div>
-                <h3 class="mb-4 fw-bold">Irys Invoice System</h3>
-                <form method="POST" action="{{ url_for('routes.login') }}">
-                    <div class="form-floating mb-3">
-                        <input type="text" class="form-control" id="username" name="username" placeholder="Username"
-                            required>
-                        <label for="username">Username</label>
-                    </div>
-                    <div class="form-floating mb-4">
-                        <input type="password" class="form-control" id="password" name="password" placeholder="Password"
-                            required>
-                        <label for="password">Password</label>
-                    </div>
-                    <button class="w-100 btn btn-lg btn-primary shadow-sm rounded-pill fw-semibold" type="submit">Sign in</button>
-                    <p class="mt-4 mb-3 text-body-secondary small">Irys Middle East &copy; {{ moment }}</p>
-                </form>
+                
+                <div class="form-floating mb-4 position-relative">
+                    <input type="password" class="form-control bg-transparent border-secondary pe-5" id="password" name="password" placeholder="Password" required>
+                    <label for="password" class="text-muted"><i class="fas fa-lock me-2"></i>Password</label>
+                    <button type="button" class="btn text-muted position-absolute end-0 top-50 translate-middle-y border-0" onclick="togglePassword()" style="z-index: 5;" title="Toggle Password Visibility">
+                        <i class="fas fa-eye" id="togglePasswordIcon"></i>
+                    </button>
+                </div>
+
+                <button class="w-100 btn btn-lg btn-primary shadow-sm rounded-pill fw-semibold mb-3 transition-hover" type="submit">
+                    Sign In <i class="fas fa-arrow-right ms-2 fs-6"></i>
+                </button>
+            </form>
+
+            <div class="text-center mt-4 pt-2 border-top border-secondary-subtle">
+                <p class="mb-0 text-muted small">Irys Middle East &copy; 2026</p>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+function togglePassword() {
+    const pwdInput = document.getElementById('password');
+    const icon = document.getElementById('togglePasswordIcon');
+    if (pwdInput.type === 'password') {
+        pwdInput.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        pwdInput.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+}
+</script>
+
+<style>
+/* Subtle UI enhancements */
+.min-vh-100 {
+    min-height: 100vh;
+}
+.transition-hover {
+    transition: all 0.2s ease-in-out;
+}
+.transition-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(13, 110, 253, 0.4) !important;
+}
+.form-control:focus {
+    border-color: var(--irys-primary);
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+</style>
 {% endblock %}
