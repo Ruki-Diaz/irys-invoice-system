@@ -1,27 +1,17 @@
 from flask import Flask
 from models import db
-from flask_login import LoginManager
 import os
-
 
 def create_app():
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-prod')
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        raise ValueError("No SECRET_KEY set for Flask application. Did you forget to add it to your environment variables?")
+    app.config['SECRET_KEY'] = secret_key
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     db.init_app(app)
-
-    login_manager = LoginManager()
-    login_manager.login_view = 'routes.login'
-    login_manager.login_message_category = 'warning'
-    login_manager.init_app(app)
-
-    from models import User
-
-    @login_manager.user_loader
-    def load_user(user_id):
-        return User.query.get(int(user_id))
 
     @app.template_filter('format_aed')
     def format_aed(value):

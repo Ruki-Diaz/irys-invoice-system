@@ -1,21 +1,28 @@
 import os
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from collections import defaultdict
+from flask import session
 
-url: str = os.getenv("SUPABASE_URL", "https://rgvttnndvhlzhwtluqzc.supabase.co")
-key: str = os.getenv("SUPABASE_KEY", "sb_publishable_Iq6o25Xrk3wVmiD7gRSFxg_M2W7cSnv")
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_ANON_KEY")
 
-# Initialize the Supabase client
-supabase: Client = create_client(url, key)
+if not url or not key:
+    raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be set in the environment.")
+
+def get_supabase() -> Client:
+    access_token = session.get('supabase_token')
+    if access_token:
+        options = ClientOptions(headers={'Authorization': f'Bearer {access_token}'})
+        return create_client(url, key, options=options)
+    return create_client(url, key)
 
 def add_transaction(data):
     """Insert a new transaction into Supabase."""
-    response = supabase.table("transactions").insert(data).execute()
-    return response
+    return get_supabase().table("transactions").insert(data).execute()
 
 def get_transactions(filters=None):
     """Fetch transactions, applying optional filters."""
-    query = supabase.table("transactions").select("*")
+    query = get_supabase().table("transactions").select("*")
     
     if filters:
         if filters.get('customer'):
@@ -33,20 +40,20 @@ def get_transactions(filters=None):
     return response.data or []
 
 def get_transaction_by_id(tx_id):
-    response = supabase.table("transactions").select("*").eq("id", tx_id).execute()
+    response = get_supabase().table("transactions").select("*").eq("id", tx_id).execute()
     if response.data:
         return response.data[0]
     return None
 
 def get_transactions_by_invoice(invoice_no):
-    response = supabase.table("transactions").select("*").eq("invoice_no", invoice_no).execute()
+    response = get_supabase().table("transactions").select("*").eq("invoice_no", invoice_no).execute()
     return response.data or []
 
 def delete_transaction(tx_id):
-    supabase.table("transactions").delete().eq("id", tx_id).execute()
+    get_supabase().table("transactions").delete().eq("id", tx_id).execute()
 
 def update_transaction(tx_id, data):
-    supabase.table("transactions").update(data).eq("id", tx_id).execute()
+    get_supabase().table("transactions").update(data).eq("id", tx_id).execute()
 
 def get_invoice_totals(transactions=None):
     """Group transactions by invoice_number and calculate totals/status."""
@@ -110,54 +117,54 @@ def get_outstanding_by_customer(transactions=None):
 
 # --- Customers ---
 def get_customers():
-    response = supabase.table("customers").select("*").order("name").execute()
+    response = get_supabase().table("customers").select("*").order("name").execute()
     return response.data or []
 
 def get_customer_by_id(cust_id):
-    response = supabase.table("customers").select("*").eq("id", cust_id).execute()
+    response = get_supabase().table("customers").select("*").eq("id", cust_id).execute()
     if response.data:
         return response.data[0]
     return None
 
 def update_customer(cust_id, name):
-    supabase.table("customers").update({"name": name}).eq("id", cust_id).execute()
+    get_supabase().table("customers").update({"name": name}).eq("id", cust_id).execute()
 
 def delete_customer(cust_id):
-    supabase.table("customers").delete().eq("id", cust_id).execute()
+    get_supabase().table("customers").delete().eq("id", cust_id).execute()
 
 def ensure_customer(name):
     if not name:
         return None
     name = name.strip()
-    existing = supabase.table("customers").select("*").ilike("name", name).execute().data
+    existing = get_supabase().table("customers").select("*").ilike("name", name).execute().data
     if not existing:
-        supabase.table("customers").insert({"name": name}).execute()
+        get_supabase().table("customers").insert({"name": name}).execute()
     return name
 
 
 # --- Salespersons ---
 def get_salespersons():
-    response = supabase.table("salespersons").select("*").order("name").execute()
+    response = get_supabase().table("salespersons").select("*").order("name").execute()
     return response.data or []
 
 def get_salesperson_by_id(sp_id):
-    response = supabase.table("salespersons").select("*").eq("id", sp_id).execute()
+    response = get_supabase().table("salespersons").select("*").eq("id", sp_id).execute()
     if response.data:
         return response.data[0]
     return None
 
 def update_salesperson(sp_id, name):
-    supabase.table("salespersons").update({"name": name}).eq("id", sp_id).execute()
+    get_supabase().table("salespersons").update({"name": name}).eq("id", sp_id).execute()
 
 def delete_salesperson(sp_id):
-    supabase.table("salespersons").delete().eq("id", sp_id).execute()
+    get_supabase().table("salespersons").delete().eq("id", sp_id).execute()
 
 def ensure_salesperson(name):
     if not name:
         return None
     name = name.strip()
-    existing = supabase.table("salespersons").select("*").ilike("name", name).execute().data
+    existing = get_supabase().table("salespersons").select("*").ilike("name", name).execute().data
     if not existing:
-        supabase.table("salespersons").insert({"name": name}).execute()
+        get_supabase().table("salespersons").insert({"name": name}).execute()
     return name
 

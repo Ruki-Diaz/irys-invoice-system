@@ -40,10 +40,10 @@ def main():
     # Load from .env if present
     load_dotenv()
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
+    key = os.getenv("SUPABASE_ANON_KEY")
 
     if not url or not key:
-        print("ERROR: SUPABASE_URL and SUPABASE_KEY must be set in your .env file or environment.")
+        print("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in your .env file or environment.")
         return
 
     # Initialize Supabase Client
