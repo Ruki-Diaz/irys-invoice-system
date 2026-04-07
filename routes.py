@@ -1,7 +1,5 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file
-from flask_login import login_user, login_required, logout_user, current_user
-from werkzeug.security import check_password_hash
-from models import db, User, Customer, Salesperson, PaymentType, BankAccount
+from flask import Blueprint, render_template, redirect, url_for, flash, request, send_file, session
+from models import db, Customer, Salesperson, PaymentType, BankAccount
 import supabase_client as sc
 from sqlalchemy import func
 import pandas as pd
@@ -14,40 +12,62 @@ from functools import wraps
 
 routes_bp = Blueprint('routes', __name__)
 
+def is_authenticated():
+    return session.get('supabase_token') is not None
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not is_authenticated():
+            flash('Please log in to access this page.', 'warning')
+            return redirect(url_for('routes.login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or current_user.role != 'admin':
+        if not is_authenticated():
             flash('You do not have permission to access that page.', 'danger')
-            return redirect(url_for('routes.dashboard'))
+            return redirect(url_for('routes.login'))
         return f(*args, **kwargs)
     return decorated_function
 
 @routes_bp.route('/login', methods=['GET', 'POST'])
 def login():
-    if current_user.is_authenticated:
+    if is_authenticated():
         return redirect(url_for('routes.dashboard'))
     
     if request.method == 'POST':
-        username = request.form.get('username')
+        email = request.form.get('email')
         password = request.form.get('password')
         
-        user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password, password):
-            if not user.is_active:
-                flash('This account has been deactivated. Please contact an administrator.', 'danger')
-                return redirect(url_for('routes.login'))
-            login_user(user)
-            return redirect(url_for('routes.dashboard'))
-        else:
-            flash('Invalid username or password', 'danger')
+        try:
+            auth_response = sc.get_supabase().auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+            if auth_response.user and auth_response.session:
+                session['supabase_token'] = auth_response.session.access_token
+                session['user_id'] = auth_response.user.id
+                return redirect(url_for('routes.dashboard'))
+            else:
+                flash('Invalid credentials.', 'danger')
+        except Exception as e:
+            logging.error(f"Login error: {e}")
+            flash('Invalid email or password', 'danger')
             
     return render_template('login.html')
 
 @routes_bp.route('/logout')
 @login_required
 def logout():
-    logout_user()
+    try:
+        sc.get_supabase().auth.sign_out()
+    except Exception as e:
+        logging.error(f"Sign out error: {e}")
+    session.pop('supabase_token', None)
+    session.pop('user_id', None)
     return redirect(url_for('routes.login'))
 
 @routes_bp.route('/')
@@ -1045,73 +1065,6 @@ def delete_bank_account(id):
     return redirect(url_for('routes.master_bank_accounts'))
 
 # ==========================================
-# PHASE 3: ADMIN USER MANAGEMENT ROUTES
+# PHASE 3: ADMIN USER MANAGEMENT ROUTES (REMOVED)
+# Note: User management is now handled via Supabase Auth dashboard or Admin API.
 # ==========================================
-
-@routes_bp.route('/master/users')
-@login_required
-@admin_required
-def master_users():
-    users = User.query.all()
-    return render_template('user_list.html', users=users)
-
-@routes_bp.route('/master/users/add', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def add_user():
-    if request.method == 'POST':
-        username = request.form.get('username').strip()
-        password = request.form.get('password')
-        role = request.form.get('role')
-        
-        if User.query.filter(func.lower(User.username) == func.lower(username)).first():
-            flash(f'Username "{username}" already exists.', 'danger')
-        else:
-            from werkzeug.security import generate_password_hash
-            new_user = User(
-                username=username, 
-                password=generate_password_hash(password),
-                role=role,
-                is_active=True
-            )
-            db.session.add(new_user)
-            db.session.commit()
-            flash('User created successfully.', 'success')
-            return redirect(url_for('routes.master_users'))
-            
-    return render_template('user_form.html', user=None)
-
-@routes_bp.route('/master/users/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def edit_user(id):
-    user = User.query.get_or_404(id)
-    
-    # Prevent editing the super admin role unless logging in as them
-    if user.username == 'admin' and current_user.username != 'admin':
-         flash('Only the master admin can edit this account.', 'danger')
-         return redirect(url_for('routes.master_users'))
-
-    if request.method == 'POST':
-        new_username = request.form.get('username').strip()
-        
-        # Check duplicate
-        existing = User.query.filter(func.lower(User.username) == func.lower(new_username), User.id != id).first()
-        if existing:
-            flash(f'Username "{new_username}" already exists.', 'danger')
-        else:
-            user.username = new_username
-            user.role = request.form.get('role')
-            user.is_active = request.form.get('is_active') == 'true'
-            
-            # Optional password reset
-            new_password = request.form.get('password')
-            if new_password:
-                from werkzeug.security import generate_password_hash
-                user.password = generate_password_hash(new_password)
-                
-            db.session.commit()
-            flash('User updated successfully.', 'success')
-            return redirect(url_for('routes.master_users'))
-            
-    return render_template('user_form.html', user=user)

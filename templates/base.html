@@ -27,7 +27,7 @@
 <body>
 
     <header
-        class="navbar sticky-top flex-nowrap p-0 shadow bg-body-tertiary {% if not current_user.is_authenticated %}d-none{% endif %}">
+        class="navbar sticky-top flex-nowrap p-0 shadow bg-body-tertiary {% if not session.get('supabase_token') %}d-none{% endif %}">
         <a class="navbar-brand col-md-3 col-lg-2 me-0 px-3 fs-6 d-flex flex-column align-items-start text-body overflow-hidden text-truncate" href="/" style="background-color: var(--bs-body-bg);">
             <span class="fw-bold text-truncate w-100">Irys Invoice Management System</span>
             <small class="text-body-secondary text-truncate w-100" style="font-size: 0.75rem;">Finance Dashboard</small>
@@ -58,7 +58,7 @@
 
     <div class="container-fluid">
         <div class="row">
-            {% if current_user.is_authenticated %}
+            {% if session.get('supabase_token') %}
             <nav id="sidebarMenu" class="col-md-3 col-lg-2 d-md-block sidebar collapse bg-body-tertiary">
                 <div class="position-sticky sidebar-sticky">
                     <ul class="nav flex-column mb-auto">
@@ -88,7 +88,6 @@
                         </li>
                     </ul>
 
-                    {% if current_user.role == 'admin' %}
                     <h6
                         class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-body-secondary text-uppercase">
                         <span>Master Data</span>
@@ -119,22 +118,6 @@
                             </a>
                         </li>
                     </ul>
-                    {% endif %}
-
-                    {% if current_user.role == 'admin' %}
-                    <h6
-                        class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-body-secondary text-uppercase">
-                        <span>User Management</span>
-                    </h6>
-                    <ul class="nav flex-column mb-auto">
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint and request.endpoint.startswith('routes.master_users') %}active{% endif %}"
-                                href="{{ url_for('routes.master_users') }}">
-                                <i class="fas fa-user-shield me-2"></i>Staff Accounts
-                            </a>
-                        </li>
-                    </ul>
-                    {% endif %}
 
                     <!-- Mobile-only Sign Out link inside the sidebar menu -->
                     <hr class="d-md-none text-muted my-3 px-3">
