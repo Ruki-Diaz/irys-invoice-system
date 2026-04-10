@@ -790,11 +790,11 @@ def master_customers():
 def add_customer():
     if request.method == 'POST':
         name = request.form.get('name_field').strip()
-        existing = sc.supabase.table("customers").select("*").ilike("name", name).execute().data
+        existing = sc.get_supabase().table("customers").select("*").ilike("name", name).execute().data
         if existing:
             flash(f'Customer "{name}" already exists.', 'danger')
         else:
-            sc.supabase.table("customers").insert({"name": name}).execute()
+            sc.get_supabase().table("customers").insert({"name": name, "user_id": session.get('user_id')}).execute()
             flash('Customer added successfully.', 'success')
             return redirect(url_for('routes.master_customers'))
             
@@ -822,7 +822,7 @@ def edit_customer(id):
             flash(f'Cannot edit Customer "{customer["name"]}" because they are linked to existing transactions.', 'danger')
             return redirect(url_for('routes.master_customers'))
             
-        existing = sc.supabase.table("customers").select("*").ilike("name", new_name).neq("id", id).execute().data
+        existing = sc.get_supabase().table("customers").select("*").ilike("name", new_name).neq("id", id).execute().data
         if existing:
             flash(f'Customer "{new_name}" already exists.', 'danger')
         else:
@@ -873,11 +873,11 @@ def master_salespersons():
 def add_salesperson():
     if request.method == 'POST':
         name = request.form.get('name_field').strip()
-        existing = sc.supabase.table("salespersons").select("*").ilike("name", name).execute().data
+        existing = sc.get_supabase().table("salespersons").select("*").ilike("name", name).execute().data
         if existing:
             flash(f'Salesperson "{name}" already exists.', 'danger')
         else:
-            sc.supabase.table("salespersons").insert({"name": name}).execute()
+            sc.get_supabase().table("salespersons").insert({"name": name, "user_id": session.get('user_id')}).execute()
             flash('Salesperson added successfully.', 'success')
             return redirect(url_for('routes.master_salespersons'))
             
@@ -904,7 +904,7 @@ def edit_salesperson(id):
             flash(f'Cannot edit Salesperson "{salesperson["name"]}" because they are linked to existing transactions.', 'danger')
             return redirect(url_for('routes.master_salespersons'))
             
-        existing = sc.supabase.table("salespersons").select("*").ilike("name", new_name).neq("id", id).execute().data
+        existing = sc.get_supabase().table("salespersons").select("*").ilike("name", new_name).neq("id", id).execute().data
         if existing:
             flash(f'Salesperson "{new_name}" already exists.', 'danger')
         else:

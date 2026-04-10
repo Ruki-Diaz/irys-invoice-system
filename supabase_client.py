@@ -21,6 +21,7 @@ def get_supabase() -> Client:
 
 def add_transaction(data):
     """Insert a new transaction into Supabase."""
+    data['user_id'] = session.get('user_id')
     return get_supabase().table("transactions").insert(data).execute()
 
 def get_transactions(filters=None):
@@ -178,7 +179,7 @@ def ensure_customer(name):
         if existing and hasattr(existing, 'data') and existing.data:
             pass
         else:
-            get_supabase().table("customers").insert({"name": name}).execute()
+            get_supabase().table("customers").insert({"name": name, "user_id": session.get('user_id')}).execute()
     except Exception as e:
         logging.error(f"Error ensuring customer {name}: {e}")
     return name
@@ -229,7 +230,7 @@ def ensure_salesperson(name):
         if existing and hasattr(existing, 'data') and existing.data:
             pass
         else:
-            get_supabase().table("salespersons").insert({"name": name}).execute()
+            get_supabase().table("salespersons").insert({"name": name, "user_id": session.get('user_id')}).execute()
     except Exception as e:
         logging.error(f"Error ensuring salesperson {name}: {e}")
     return name
