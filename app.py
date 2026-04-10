@@ -6,7 +6,7 @@ from flask import Flask
 from models import db
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder='static')
     if not os.getenv('SECRET_KEY'):
         raise RuntimeError("SECRET_KEY is not set in environment variables")
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
