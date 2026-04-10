@@ -1,13 +1,15 @@
+from dotenv import load_dotenv
+import os
+load_dotenv()
+
 from flask import Flask
 from models import db
-import os
 
 def create_app():
     app = Flask(__name__)
-    secret_key = os.environ.get('SECRET_KEY')
-    if not secret_key:
-        raise ValueError("No SECRET_KEY set for Flask application. Did you forget to add it to your environment variables?")
-    app.config['SECRET_KEY'] = secret_key
+    if not os.getenv('SECRET_KEY'):
+        raise RuntimeError("SECRET_KEY is not set in environment variables")
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 

@@ -1,10 +1,13 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from supabase import create_client, Client, ClientOptions
 from collections import defaultdict
 from flask import session
 
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_ANON_KEY")
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_ANON_KEY")
 
 if not url or not key:
     raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be set in the environment.")
@@ -22,32 +25,47 @@ def add_transaction(data):
 
 def get_transactions(filters=None):
     """Fetch transactions, applying optional filters."""
-    query = get_supabase().table("transactions").select("*")
-    
-    if filters:
-        if filters.get('customer'):
-            query = query.ilike('customer', f"%{filters['customer']}%")
-        if filters.get('invoice_no'):
-            query = query.ilike('invoice_no', f"%{filters['invoice_no']}%")
-        if filters.get('start_date'):
-            query = query.gte('transaction_date', filters['start_date'])
-        if filters.get('end_date'):
-            query = query.lte('transaction_date', filters['end_date'])
-        if filters.get('salesperson'):
-             query = query.eq('salesperson', filters['salesperson'])
-            
-    response = query.order('transaction_date', desc=True).execute()
-    return response.data or []
+    import logging
+    try:
+        query = get_supabase().table("transactions").select("*")
+        
+        if filters:
+            if filters.get('customer'):
+                query = query.ilike('customer', f"%{filters['customer']}%")
+            if filters.get('invoice_no'):
+                query = query.ilike('invoice_no', f"%{filters['invoice_no']}%")
+            if filters.get('start_date'):
+                query = query.gte('transaction_date', filters['start_date'])
+            if filters.get('end_date'):
+                query = query.lte('transaction_date', filters['end_date'])
+            if filters.get('salesperson'):
+                 query = query.eq('salesperson', filters['salesperson'])
+                
+        response = query.order('transaction_date', desc=True).execute()
+        return response.data if response and hasattr(response, 'data') and response.data else []
+    except Exception as e:
+        logging.error(f"Error fetching transactions: {e}")
+        return []
 
 def get_transaction_by_id(tx_id):
-    response = get_supabase().table("transactions").select("*").eq("id", tx_id).execute()
-    if response.data:
-        return response.data[0]
-    return None
+    import logging
+    try:
+        response = get_supabase().table("transactions").select("*").eq("id", tx_id).execute()
+        if response and hasattr(response, 'data') and response.data:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching transaction by ID {tx_id}: {e}")
+        return None
 
 def get_transactions_by_invoice(invoice_no):
-    response = get_supabase().table("transactions").select("*").eq("invoice_no", invoice_no).execute()
-    return response.data or []
+    import logging
+    try:
+        response = get_supabase().table("transactions").select("*").eq("invoice_no", invoice_no).execute()
+        return response.data if response and hasattr(response, 'data') and response.data else []
+    except Exception as e:
+        logging.error(f"Error fetching transactions by invoice {invoice_no}: {e}")
+        return []
 
 def delete_transaction(tx_id):
     get_supabase().table("transactions").delete().eq("id", tx_id).execute()
@@ -117,54 +135,102 @@ def get_outstanding_by_customer(transactions=None):
 
 # --- Customers ---
 def get_customers():
-    response = get_supabase().table("customers").select("*").order("name").execute()
-    return response.data or []
+    import logging
+    try:
+        response = get_supabase().table("customers").select("*").order("name").execute()
+        return response.data if response and hasattr(response, 'data') and response.data else []
+    except Exception as e:
+        logging.error(f"Error fetching customers: {e}")
+        return []
 
 def get_customer_by_id(cust_id):
-    response = get_supabase().table("customers").select("*").eq("id", cust_id).execute()
-    if response.data:
-        return response.data[0]
-    return None
+    import logging
+    try:
+        response = get_supabase().table("customers").select("*").eq("id", cust_id).execute()
+        if response and hasattr(response, 'data') and response.data:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching customer by ID {cust_id}: {e}")
+        return None
 
 def update_customer(cust_id, name):
-    get_supabase().table("customers").update({"name": name}).eq("id", cust_id).execute()
+    try:
+        get_supabase().table("customers").update({"name": name}).eq("id", cust_id).execute()
+    except Exception as e:
+        import logging
+        logging.error(f"Error updating customer {cust_id}: {e}")
 
 def delete_customer(cust_id):
-    get_supabase().table("customers").delete().eq("id", cust_id).execute()
+    try:
+        get_supabase().table("customers").delete().eq("id", cust_id).execute()
+    except Exception as e:
+        import logging
+        logging.error(f"Error deleting customer {cust_id}: {e}")
 
 def ensure_customer(name):
     if not name:
         return None
     name = name.strip()
-    existing = get_supabase().table("customers").select("*").ilike("name", name).execute().data
-    if not existing:
-        get_supabase().table("customers").insert({"name": name}).execute()
+    import logging
+    try:
+        existing = get_supabase().table("customers").select("*").ilike("name", name).execute()
+        if existing and hasattr(existing, 'data') and existing.data:
+            pass
+        else:
+            get_supabase().table("customers").insert({"name": name}).execute()
+    except Exception as e:
+        logging.error(f"Error ensuring customer {name}: {e}")
     return name
 
 
 # --- Salespersons ---
 def get_salespersons():
-    response = get_supabase().table("salespersons").select("*").order("name").execute()
-    return response.data or []
+    import logging
+    try:
+        response = get_supabase().table("salespersons").select("*").order("name").execute()
+        return response.data if response and hasattr(response, 'data') and response.data else []
+    except Exception as e:
+        logging.error(f"Error fetching salespersons: {e}")
+        return []
 
 def get_salesperson_by_id(sp_id):
-    response = get_supabase().table("salespersons").select("*").eq("id", sp_id).execute()
-    if response.data:
-        return response.data[0]
-    return None
+    import logging
+    try:
+        response = get_supabase().table("salespersons").select("*").eq("id", sp_id).execute()
+        if response and hasattr(response, 'data') and response.data:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching salesperson by ID {sp_id}: {e}")
+        return None
 
 def update_salesperson(sp_id, name):
-    get_supabase().table("salespersons").update({"name": name}).eq("id", sp_id).execute()
+    try:
+        get_supabase().table("salespersons").update({"name": name}).eq("id", sp_id).execute()
+    except Exception as e:
+        import logging
+        logging.error(f"Error updating salesperson {sp_id}: {e}")
 
 def delete_salesperson(sp_id):
-    get_supabase().table("salespersons").delete().eq("id", sp_id).execute()
+    try:
+        get_supabase().table("salespersons").delete().eq("id", sp_id).execute()
+    except Exception as e:
+        import logging
+        logging.error(f"Error deleting salesperson {sp_id}: {e}")
 
 def ensure_salesperson(name):
     if not name:
         return None
     name = name.strip()
-    existing = get_supabase().table("salespersons").select("*").ilike("name", name).execute().data
-    if not existing:
-        get_supabase().table("salespersons").insert({"name": name}).execute()
+    import logging
+    try:
+        existing = get_supabase().table("salespersons").select("*").ilike("name", name).execute()
+        if existing and hasattr(existing, 'data') and existing.data:
+            pass
+        else:
+            get_supabase().table("salespersons").insert({"name": name}).execute()
+    except Exception as e:
+        logging.error(f"Error ensuring salesperson {name}: {e}")
     return name
 

@@ -50,6 +50,7 @@ def login():
             if auth_response.user and auth_response.session:
                 session['supabase_token'] = auth_response.session.access_token
                 session['user_id'] = auth_response.user.id
+                
                 return redirect(url_for('routes.dashboard'))
             else:
                 flash('Invalid credentials.', 'danger')
@@ -74,13 +75,27 @@ def logout():
 @routes_bp.route('/dashboard')
 @login_required
 def dashboard():
-    # Calculate summary metrics from Supabase
-    all_tx = sc.get_transactions()
-    total_tx = len(all_tx)
-    total_invoice = sum(float(t.get('invoice_amount') or 0.0) for t in all_tx)
-    total_payment = sum(float(t.get('payment_amount') or 0.0) for t in all_tx)
-    total_outstanding = total_invoice - total_payment
-    
+    try:
+        # Calculate summary metrics from Supabase
+        all_tx = sc.get_transactions()
+        if not isinstance(all_tx, list):
+            logging.error(f"Dashboard error: sc.get_transactions() returned non-list: {all_tx}")
+            all_tx = []
+            
+        total_tx = len(all_tx)
+        total_invoice = sum(float(t.get('invoice_amount') or 0.0) for t in all_tx)
+        total_payment = sum(float(t.get('payment_amount') or 0.0) for t in all_tx)
+        total_outstanding = total_invoice - total_payment
+        
+    except Exception as e:
+        logging.error(f"Dashboard crash prevented! Error fetching transactions: {str(e)}")
+        logging.error(traceback.format_exc())
+        all_tx = []
+        total_tx = 0
+        total_invoice = 0.0
+        total_payment = 0.0
+        total_outstanding = 0.0
+
     return render_template('dashboard.html', 
                            total_tx=total_tx, 
                            total_invoice=total_invoice, 
