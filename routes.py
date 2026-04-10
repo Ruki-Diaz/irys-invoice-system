@@ -788,22 +788,28 @@ def master_customers():
 @login_required
 @admin_required
 def add_customer():
-    if request.method == 'POST':
-        name = request.form.get('name_field').strip()
-        existing = sc.get_supabase().table("customers").select("*").ilike("name", name).execute().data
-        if existing:
-            flash(f'Customer "{name}" already exists.', 'danger')
-        else:
-            sc.get_supabase().table("customers").insert({"name": name, "user_id": session.get('user_id')}).execute()
-            flash('Customer added successfully.', 'success')
-            return redirect(url_for('routes.master_customers'))
-            
-    return render_template('master_form.html', 
-                           title='Add Customer', 
-                           field_label='Customer Name', 
-                           current_value='',
-                           submit_url=url_for('routes.add_customer'),
-                           back_url=url_for('routes.master_customers'))
+    try:
+        if request.method == 'POST':
+            name = request.form.get('name_field').strip()
+            existing = sc.get_supabase().table("customers").select("*").ilike("name", name).execute().data
+            if existing:
+                flash(f'Customer "{name}" already exists.', 'danger')
+            else:
+                sc.get_supabase().table("customers").insert({"name": name, "user_id": session.get('user_id')}).execute()
+                flash('Customer added successfully.', 'success')
+                return redirect(url_for('routes.master_customers'))
+                
+        return render_template('master_form.html', 
+                               title='Add Customer', 
+                               field_label='Customer Name', 
+                               current_value='',
+                               submit_url=url_for('routes.add_customer'),
+                               back_url=url_for('routes.master_customers'))
+    except Exception as e:
+        import traceback
+        logging.error(f"Exception in add_customer: {e}\n{traceback.format_exc()}")
+        flash('A server error occurred while adding customer.', 'danger')
+        return redirect(url_for('routes.master_customers'))
 
 @routes_bp.route('/master/customers/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
@@ -871,22 +877,28 @@ def master_salespersons():
 @login_required
 @admin_required
 def add_salesperson():
-    if request.method == 'POST':
-        name = request.form.get('name_field').strip()
-        existing = sc.get_supabase().table("salespersons").select("*").ilike("name", name).execute().data
-        if existing:
-            flash(f'Salesperson "{name}" already exists.', 'danger')
-        else:
-            sc.get_supabase().table("salespersons").insert({"name": name, "user_id": session.get('user_id')}).execute()
-            flash('Salesperson added successfully.', 'success')
-            return redirect(url_for('routes.master_salespersons'))
-            
-    return render_template('master_form.html', 
-                           title='Add Salesperson', 
-                           field_label='Salesperson Name', 
-                           current_value='',
-                           submit_url=url_for('routes.add_salesperson'),
-                           back_url=url_for('routes.master_salespersons'))
+    try:
+        if request.method == 'POST':
+            name = request.form.get('name_field').strip()
+            existing = sc.get_supabase().table("salespersons").select("*").ilike("name", name).execute().data
+            if existing:
+                flash(f'Salesperson "{name}" already exists.', 'danger')
+            else:
+                sc.get_supabase().table("salespersons").insert({"name": name, "user_id": session.get('user_id')}).execute()
+                flash('Salesperson added successfully.', 'success')
+                return redirect(url_for('routes.master_salespersons'))
+                
+        return render_template('master_form.html', 
+                               title='Add Salesperson', 
+                               field_label='Salesperson Name', 
+                               current_value='',
+                               submit_url=url_for('routes.add_salesperson'),
+                               back_url=url_for('routes.master_salespersons'))
+    except Exception as e:
+        import traceback
+        logging.error(f"Exception in add_salesperson: {e}\n{traceback.format_exc()}")
+        flash('A server error occurred while adding salesperson.', 'danger')
+        return redirect(url_for('routes.master_salespersons'))
 
 @routes_bp.route('/master/salespersons/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
