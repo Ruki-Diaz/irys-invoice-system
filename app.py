@@ -7,9 +7,7 @@ from models import db
 
 def create_app():
     app = Flask(__name__, static_folder='static')
-    if not os.getenv('SECRET_KEY'):
-        raise RuntimeError("SECRET_KEY is not set in environment variables")
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'irys-finance-secret-key-2026')
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 

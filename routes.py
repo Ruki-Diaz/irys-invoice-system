@@ -113,8 +113,6 @@ def add_transaction():
     if request.method == 'POST':
         try:
             date_str = request.form.get('date')
-            tx_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-            
             invoice_amount = float(request.form.get('invoice_amount') or 0.0)
             payment_amount = float(request.form.get('payment_amount') or 0.0)
             
@@ -122,11 +120,18 @@ def add_transaction():
                 flash('Amounts cannot be negative.', 'danger')
                 return redirect(request.url)
             
-            # Check for existing invoice
-            invoice_number = request.form.get('invoice_number').strip()
+            if invoice_amount == 0 and payment_amount == 0:
+                flash('Please enter a valid payment amount or invoice amount.', 'danger')
+                return redirect(request.url)
+                
+            raw_invoice_number = request.form.get('invoice_number') or ''
+            invoice_number = raw_invoice_number.strip()
             
-            # Master data IDs vs Names mapping
-            # (We will store strings in Supabase so filters don't require JOIN logic later)
+            # If creating an invoice (invoice_amount > 0), invoice number is required
+            if invoice_amount > 0 and not invoice_number:
+                flash('Invoice number is required when creating an invoice.', 'danger')
+                return redirect(request.url)
+            
             # Master data names
             cust_name = request.form.get('customer_name')
             if cust_name == '___OTHER___':
@@ -136,48 +141,36 @@ def add_transaction():
             if sp_name == '___OTHER___':
                 sp_name = request.form.get('new_salesperson_name')
             
+            if not cust_name:
+                flash('Customer selection is required.', 'danger')
+                return redirect(request.url)
+                
             final_cust_name = sc.ensure_customer(cust_name)
-            final_sp_name = sc.ensure_salesperson(sp_name)
+            final_sp_name = sc.ensure_salesperson(sp_name) if sp_name else None
             pt = PaymentType.query.get(request.form.get('payment_type_id')) if request.form.get('payment_type_id') else None
             ba = BankAccount.query.get(request.form.get('bank_account_id')) if request.form.get('bank_account_id') else None
 
-            # Aggregate existing payments for this invoice
-            existing_txs = sc.get_transactions_by_invoice(invoice_number)
-            
-            if existing_txs:
-                # It's a follow-up payment
-                original_tx = existing_txs[0]
-                
-                # Validation: ensure customer matches
-                if original_tx.get('customer') != final_cust_name:
-                    flash(f'Invoice {invoice_number} belongs to a different customer ({original_tx.get("customer")}).', 'danger')
-                    return redirect(request.url)
-                    
-                # Calculate total outstanding
-                total_invoiced = sum(float(t.get('invoice_amount') or 0) for t in existing_txs)
-                total_paid = sum(float(t.get('payment_amount') or 0) for t in existing_txs)
-                remaining = total_invoiced - total_paid
-                
-                if payment_amount > remaining:
-                    flash(f'Overpayment detected. Remaining balance for invoice {invoice_number} is only AED {remaining:.2f}.', 'warning')
-                    return redirect(request.url)
-                    
-                # Force invoice amount to 0 for follow-up payments
-                invoice_amount = 0.0
-                flash(f'Added follow-up payment for Invoice {invoice_number}.', 'info')
-            
             remark_type = request.form.get('remark_type')
             if remark_type == 'Invoice':
                 final_remark = 'Invoice'
             elif remark_type == 'Payment':
                 final_remark = 'Payment'
-            else:
+            elif remark_type == 'Other':
                 custom_val = request.form.get('remark_custom')
-                final_remark = custom_val.strip() if custom_val else ''
+                final_remark = custom_val.strip() if custom_val else 'Other'
+            else:
+                custom_val = request.form.get('remark_custom') or request.form.get('remark') or ''
+                final_remark = custom_val.strip()
+
+            if not final_remark:
+                if payment_amount > 0 and invoice_amount == 0:
+                    final_remark = 'Payment'
+                elif invoice_amount > 0:
+                    final_remark = 'Invoice'
 
             tx_data = {
                 'customer': final_cust_name,
-                'salesperson': final_sp_name,
+                'salesperson': final_sp_name or '',
                 'invoice_no': invoice_number,
                 'transaction_date': date_str,
                 'invoice_amount': invoice_amount,
@@ -188,7 +181,10 @@ def add_transaction():
             }
             
             sc.add_transaction(tx_data)
-            flash('Transaction added successfully.', 'success')
+            if payment_amount > 0 and invoice_amount == 0:
+                flash('Customer payment recorded successfully.', 'success')
+            else:
+                flash('Transaction added successfully.', 'success')
             return redirect(url_for('routes.view_transactions'))
         except Exception as e:
             flash(f'Error adding transaction: {str(e)}', 'danger')
@@ -202,7 +198,9 @@ def add_transaction():
 @routes_bp.route('/api/invoice_details/<path:invoice_number>', methods=['GET'])
 @login_required
 def invoice_details(invoice_number):
-    txs = sc.get_transactions_by_invoice(invoice_number)
+    if not invoice_number or not invoice_number.strip():
+        return {'exists': False}
+    txs = sc.get_transactions_by_invoice(invoice_number.strip())
     if not txs:
         return {'exists': False}
     
@@ -245,20 +243,25 @@ def view_transactions():
     transactions = sc.get_transactions(filters)
     # Calculate grouped invoice totals
     invoice_totals = sc.get_invoice_totals(transactions)
+    # Retrieve direct payments
+    direct_payments = sc.get_direct_payments(transactions)
     
     # Apply status filter
     filter_status = request.args.get('status', 'all')
     if filter_status == 'paid':
         invoice_totals = {k: v for k, v in invoice_totals.items() if v['status'] == 'Paid'}
+        direct_payments = []
     elif filter_status == 'pending':
         invoice_totals = {k: v for k, v in invoice_totals.items() if v['status'] != 'Paid'}
+        
     salespersons = sc.get_salespersons()
     payment_types = PaymentType.query.order_by(PaymentType.type_name).all()
     
     return render_template('view_transactions.html', 
                            salespersons=salespersons,
                            payment_types=payment_types,
-                           invoice_totals=invoice_totals)
+                           invoice_totals=invoice_totals,
+                           direct_payments=direct_payments)
 
 @routes_bp.route('/transactions/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
@@ -293,7 +296,13 @@ def edit_transaction(id):
                 flash('Amounts cannot be negative.', 'danger')
                 return redirect(request.url)
             
-            new_invoice_number = request.form.get('invoice_number')
+            new_invoice_number = (request.form.get('invoice_number') or '').strip()
+            
+            # If it's an invoice transaction, invoice number is required
+            if invoice_amount > 0 and not new_invoice_number:
+                flash('Invoice number is required for an invoice record.', 'danger')
+                return redirect(request.url)
+            
             cust_name = request.form.get('customer_name')
             if cust_name == '___OTHER___':
                 cust_name = request.form.get('new_customer_name')
@@ -305,20 +314,8 @@ def edit_transaction(id):
             payment_type_id = request.form.get('payment_type_id')
             bank_account_id = request.form.get('bank_account_id')
             
-            if not new_invoice_number:
-                flash('Invoice number is required.', 'danger')
-                return redirect(request.url)
-            
-            if new_invoice_number != tx.get('invoice_no'):
-                existing_txs = sc.get_transactions_by_invoice(new_invoice_number)
-                if existing_txs:
-                    original_tx = existing_txs[0]
-                    if original_tx.get('customer') != sc.ensure_customer(cust_name):
-                        flash(f'Cannot change to invoice {new_invoice_number}. It belongs to a different customer ({original_tx.get("customer")}).', 'danger')
-                        return redirect(request.url)
-            
             final_cust_name = sc.ensure_customer(cust_name)
-            final_sp_name = sc.ensure_salesperson(sp_name)
+            final_sp_name = sc.ensure_salesperson(sp_name) if sp_name else None
             pt = PaymentType.query.get(payment_type_id) if payment_type_id else None
             ba = BankAccount.query.get(bank_account_id) if bank_account_id else None
 
@@ -327,14 +324,17 @@ def edit_transaction(id):
                 final_remark = 'Invoice'
             elif remark_type == 'Payment':
                 final_remark = 'Payment'
-            else:
+            elif remark_type == 'Other':
                 custom_val = request.form.get('remark_custom')
-                final_remark = custom_val.strip() if custom_val else ''
+                final_remark = custom_val.strip() if custom_val else 'Other'
+            else:
+                custom_val = request.form.get('remark_custom') or request.form.get('remark') or ''
+                final_remark = custom_val.strip()
 
             update_data = {
                 'invoice_no': new_invoice_number,
                 'customer': final_cust_name,
-                'salesperson': final_sp_name,
+                'salesperson': final_sp_name or '',
                 'transaction_date': date_str,
                 'invoice_amount': invoice_amount,
                 'payment_amount': payment_amount,
@@ -429,11 +429,14 @@ def export_excel():
         pay_amt = float(tx.get('payment_amount') or 0.0)
         total_invoice += inv_amt
         total_payment += pay_amt
+        inv_display = (tx.get('invoice_no') or '').strip()
+        if not inv_display:
+            inv_display = 'Direct Payment' if pay_amt > 0 else '—'
         data.append({
             'Date': tx.get('transaction_date'),
-            'Invoice Number': tx.get('invoice_no'),
+            'Invoice Number': inv_display,
             'Customer': tx.get('customer'),
-            'Salesperson': tx.get('salesperson'),
+            'Salesperson': tx.get('salesperson') or '—',
             'Invoice Amount': inv_amt,
             'Payment Amount': pay_amt,
             'Outstanding': inv_amt - pay_amt,
@@ -488,7 +491,7 @@ class PDFReport(FPDF):
 @login_required
 def pdf_customer_statement(customer_name):
     transactions = sc.get_transactions({'customer': customer_name})
-    transactions.sort(key=lambda x: x['transaction_date']) # sort asc
+    transactions.sort(key=lambda x: str(x.get('transaction_date') or '')) # sort asc
     
     total_inv = sum(float(tx.get('invoice_amount') or 0) for tx in transactions)
     total_pay = sum(float(tx.get('payment_amount') or 0) for tx in transactions)
@@ -518,8 +521,11 @@ def pdf_customer_statement(customer_name):
     # Table Body
     pdf.set_font('Helvetica', '', 9)
     for tx in transactions:
-        pdf.cell(30, 8, tx.get('transaction_date'), 1, 0, 'C')
-        pdf.cell(35, 8, tx.get('invoice_no'), 1, 0, 'C')
+        pdf.cell(30, 8, str(tx.get('transaction_date') or ''), 1, 0, 'C')
+        inv_display = (tx.get('invoice_no') or '').strip()
+        if not inv_display:
+            inv_display = 'Direct Payment' if float(tx.get('payment_amount') or 0) > 0 else '—'
+        pdf.cell(35, 8, inv_display, 1, 0, 'C')
         inv_amt = float(tx.get('invoice_amount') or 0)
         pay_amt = float(tx.get('payment_amount') or 0)
         pdf.cell(35, 8, f'AED {inv_amt:.2f}', 1, 0, 'R')
@@ -537,7 +543,7 @@ def pdf_customer_statement(customer_name):
 @routes_bp.route('/export/pdf/outstanding')
 @login_required
 def pdf_outstanding():
-    # aggregate by customer using Supabase
+    # aggregate by customer directly from Supabase
     outstanding_data = sc.get_outstanding_by_customer()
     
     pdf = PDFReport()
@@ -664,7 +670,7 @@ def export_outstanding():
             pdf.cell(0, 8, f'Outstanding Balance: AED {bal:.2f}', 0, 1)
             pdf.ln(5)
             
-            transactions.sort(key=lambda x: x['transaction_date'])
+            transactions.sort(key=lambda x: str(x.get('transaction_date') or ''))
             
             pdf.set_fill_color(240, 240, 240)
             pdf.set_font('Helvetica', 'B', 10)
@@ -676,8 +682,11 @@ def export_outstanding():
             
             pdf.set_font('Helvetica', '', 9)
             for tx in transactions:
-                pdf.cell(30, 8, tx.get('transaction_date'), 1, 0, 'C')
-                pdf.cell(35, 8, tx.get('invoice_no'), 1, 0, 'C')
+                pdf.cell(30, 8, str(tx.get('transaction_date') or ''), 1, 0, 'C')
+                inv_display = (tx.get('invoice_no') or '').strip()
+                if not inv_display:
+                    inv_display = 'Direct Payment' if float(tx.get('payment_amount') or 0) > 0 else '—'
+                pdf.cell(35, 8, inv_display, 1, 0, 'C')
                 inv_amt = float(tx.get('invoice_amount') or 0)
                 pay_amt = float(tx.get('payment_amount') or 0)
                 pdf.cell(35, 8, f'AED {inv_amt:.2f}', 1, 0, 'R')
@@ -738,14 +747,17 @@ def export_outstanding():
                 }]
                 pd.DataFrame(summary_data).to_excel(writer, index=False, sheet_name='Summary')
                 
-                transactions.sort(key=lambda x: x['transaction_date'])
+                transactions.sort(key=lambda x: str(x.get('transaction_date') or ''))
                 tx_data = []
                 for tx in transactions:
                     inv_amt = float(tx.get('invoice_amount') or 0)
                     pay_amt = float(tx.get('payment_amount') or 0)
+                    inv_display = (tx.get('invoice_no') or '').strip()
+                    if not inv_display:
+                        inv_display = 'Direct Payment' if pay_amt > 0 else '—'
                     tx_data.append({
                         'Date': tx.get('transaction_date'),
-                        'Invoice Number': tx.get('invoice_no'),
+                        'Invoice Number': inv_display,
                         'Invoice Amount': inv_amt,
                         'Payment Amount': pay_amt,
                         'Remark': tx.get('remark') or ''

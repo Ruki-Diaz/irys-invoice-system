@@ -7,21 +7,25 @@ from collections import defaultdict
 from flask import session
 
 url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_ANON_KEY")
+key: str = os.getenv("SUPABASE_KEY") or os.getenv("SUPABASE_ANON_KEY")
 
 if not url or not key:
-    raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY must be set in the environment.")
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY/SUPABASE_ANON_KEY must be set in the environment.")
 
 def get_supabase() -> Client:
-    access_token = session.get('supabase_token')
+    access_token = session.get('supabase_token') if session else None
     if access_token:
         options = ClientOptions(headers={'Authorization': f'Bearer {access_token}'})
         return create_client(url, key, options=options)
     return create_client(url, key)
 
+DEFAULT_USER_ID = "eea809b7-53d5-43ee-8d73-0d570403001b"
+
 def add_transaction(data):
     """Insert a new transaction into Supabase."""
-    data['user_id'] = session.get('user_id')
+    if not data.get('user_id'):
+        uid = (session.get('user_id') if session else None) or DEFAULT_USER_ID
+        data['user_id'] = uid
     return get_supabase().table("transactions").insert(data).execute()
 
 def get_transactions(filters=None):
@@ -75,7 +79,7 @@ def update_transaction(tx_id, data):
     get_supabase().table("transactions").update(data).eq("id", tx_id).execute()
 
 def get_invoice_totals(transactions=None):
-    """Group transactions by invoice_number and calculate totals/status."""
+    """Group transactions with a real invoice_number by invoice_no and calculate totals/status."""
     if transactions is None:
         transactions = get_transactions()
         
@@ -90,8 +94,12 @@ def get_invoice_totals(transactions=None):
     })
     
     for t in transactions:
-        inv = t['invoice_no']
-        # accumulate totals
+        inv = (t.get('invoice_no') or '').strip()
+        if not inv:
+            # Skip direct payments with blank invoice numbers from colliding under a single empty key
+            continue
+            
+        # accumulate totals for real invoices
         invoice_totals[inv]['invoiced'] += float(t.get('invoice_amount') or 0.0)
         invoice_totals[inv]['paid'] += float(t.get('payment_amount') or 0.0)
         # Use first seen customer and salesperson for metadata
@@ -112,22 +120,44 @@ def get_invoice_totals(transactions=None):
             
     return dict(invoice_totals)
 
+def get_direct_payments(transactions=None):
+    """Return individual direct customer payment transactions that have no invoice number."""
+    if transactions is None:
+        transactions = get_transactions()
+        
+    direct_payments = []
+    for t in transactions:
+        inv = (t.get('invoice_no') or '').strip()
+        pay_amt = float(t.get('payment_amount') or 0.0)
+        
+        # Direct payments: payment amount > 0 and no invoice number
+        if not inv and pay_amt > 0:
+            direct_payments.append(t)
+            
+    return direct_payments
+
 def get_outstanding_by_customer(transactions=None):
-    """Group aggregated invoices by customer."""
-    invoice_totals = get_invoice_totals(transactions)
-    
+    """Group transactions directly by customer to calculate outstanding balance:
+    Customer Balance = Sum of Invoice Amounts - Sum of Payment Amounts.
+    Does NOT depend on invoice groupings so direct payments reduce balances correctly.
+    """
+    if transactions is None:
+        transactions = get_transactions()
+        
     customer_totals = defaultdict(lambda: {
         'tot_inv': 0.0,
         'tot_pay': 0.0,
         'balance': 0.0
     })
     
-    for inv, totals in invoice_totals.items():
-        cust = totals['customer']
+    for t in transactions:
+        cust = (t.get('customer') or '').strip()
         if cust:
-            customer_totals[cust]['tot_inv'] += totals['invoiced']
-            customer_totals[cust]['tot_pay'] += totals['paid']
-            customer_totals[cust]['balance'] += totals['balance']
+            customer_totals[cust]['tot_inv'] += float(t.get('invoice_amount') or 0.0)
+            customer_totals[cust]['tot_pay'] += float(t.get('payment_amount') or 0.0)
+            
+    for cust, data in customer_totals.items():
+        data['balance'] = data['tot_inv'] - data['tot_pay']
             
     # filter positive balances
     outstanding = {k: v for k, v in customer_totals.items() if v['balance'] > 0}
@@ -179,7 +209,8 @@ def ensure_customer(name):
         if existing and hasattr(existing, 'data') and existing.data:
             pass
         else:
-            get_supabase().table("customers").insert({"name": name, "user_id": session.get('user_id')}).execute()
+            uid = (session.get('user_id') if session else None) or DEFAULT_USER_ID
+            get_supabase().table("customers").insert({"name": name, "user_id": uid}).execute()
     except Exception as e:
         logging.error(f"Error ensuring customer {name}: {e}")
     return name
@@ -230,8 +261,8 @@ def ensure_salesperson(name):
         if existing and hasattr(existing, 'data') and existing.data:
             pass
         else:
-            get_supabase().table("salespersons").insert({"name": name, "user_id": session.get('user_id')}).execute()
+            uid = (session.get('user_id') if session else None) or DEFAULT_USER_ID
+            get_supabase().table("salespersons").insert({"name": name, "user_id": uid}).execute()
     except Exception as e:
         logging.error(f"Error ensuring salesperson {name}: {e}")
     return name
-
